@@ -1,0 +1,21 @@
+/target
+
+# Python
+.venv/
+__pycache__/
+*.so
+*.pyd
+/bindings/python/dist/
+
+# Node
+node_modules/
+*.node
+/bindings/node/npm/
+/bindings/node/artifacts/
+
+# Web playground (WASM pkg and deps are built locally / in CI)
+web/node_modules/
+web/dist/
+web/pkg/
+
+.tmp/

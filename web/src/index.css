@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+}
+
+@layer components {
+  .playground-shell {
+    @apply min-h-screen bg-base-200;
+    background-image:
+      radial-gradient(ellipse 70% 45% at 15% 0%, oklch(var(--p) / 0.12), transparent 55%),
+      radial-gradient(ellipse 50% 40% at 95% 90%, oklch(var(--s) / 0.1), transparent 50%);
+  }
+
+  .preview-svg svg {
+    @apply mx-auto block;
+    max-width: min(100%, 480px);
+    max-height: min(62vh, 440px);
+    height: auto;
+    filter: drop-shadow(0 16px 32px oklch(var(--bc) / 0.12));
+  }
+}

@@ -1,0 +1,48 @@
+[package]
+name = "penfill"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Fills and hatches for pen plotters: zigzag, spiral, lattices, stipple, gravel, marble, CAD .pat patterns, your own functions and SVG tiles."
+repository = "https://github.com/pileoni/penfill"
+readme = "README.md"
+keywords = ["plotter", "infill", "hatch", "zigzag", "svg"]
+categories = ["graphics", "algorithms"]
+exclude = ["examples/gallery/*", "docs/*", "bindings/*", "web/*", ".github/*", ".cargo/*"]
+
+[workspace]
+members = ["bindings/python", "bindings/node", "bindings/wasm"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pileoni/penfill"
+
+[dependencies]
+i_overlay = "4.5"         # offsetting + boolean clipping, pure Rust (the engine under geo)
+roxmltree = "0.21.1"
+svgtypes = "0.16.1"
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+
+[features]
+default = ["image"]
+# Decode PNG / JPEG / GIF / BMP / WebP for `dither::Greyscale::decode`.
+image = ["dep:image"]
+
+[dev-dependencies]
+approx = "0.5"
+
+[lib]
+name = "penfill"
+
+[[example]]
+name = "gallery"
+required-features = ["image"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.release.package.penfill-wasm]
+opt-level = "s"

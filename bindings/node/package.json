@@ -1,0 +1,40 @@
+{
+  "name": "penfill",
+  "version": "0.2.0",
+  "description": "Fills and hatches for pen plotters: zigzag, spiral, lattices, stipple, gravel, marble, CAD .pat patterns, your own functions and SVG tiles.",
+  "keywords": ["plotter", "pen plotter", "hatch", "infill", "zigzag", "axidraw", "svg", "generative art"],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pileoni/penfill.git",
+    "directory": "bindings/node"
+  },
+  "homepage": "https://github.com/pileoni/penfill",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts", "README.md"],
+  "engines": {
+    "node": ">= 18"
+  },
+  "napi": {
+    "binaryName": "penfill",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "node --test",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.10.5"
+  }
+}

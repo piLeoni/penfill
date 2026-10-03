@@ -1,0 +1,25 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "penfill"
+description = "Fills and hatches for pen plotters: zigzag, spiral, lattices, stipple, gravel, marble, CAD .pat patterns, your own functions and SVG tiles."
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.9"
+keywords = ["plotter", "pen plotter", "hatch", "infill", "zigzag", "axidraw", "svg", "generative art"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Artistic Software",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/pileoni/penfill"
+Repository = "https://github.com/pileoni/penfill"
+
+[tool.maturin]
+features = []

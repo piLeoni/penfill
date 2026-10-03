@@ -1,0 +1,7 @@
+# Python extension modules resolve the interpreter's symbols when they are
+# loaded, so plain `cargo build --workspace` needs this on macOS.
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
