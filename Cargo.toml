@@ -44,5 +44,11 @@ required-features = ["image"]
 lto = true
 codegen-units = 1
 
+[profile.dev]
+# Incremental builds filled target/ with tens of GB of session folders
+# across these workspaces. Off: rebuilds are a little slower, but the
+# cache stays sane.
+incremental = false
+
 [profile.release.package.penfill-wasm]
 opt-level = "s"
