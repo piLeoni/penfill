@@ -90,6 +90,26 @@ fn usable(region: &Region, spacing: f64) -> bool {
 /// The pieces of `count` lines from `first`, `spacing` apart, each tagged with
 /// the index of its line.
 fn cut_rows(rings: &[Vec<Pt>], frame: Frame, first: f64, count: usize, spacing: f64) -> Vec<(usize, Fragment)> {
+    let mut out = Vec::new();
+    cut_rows_into(rings, frame, first, count, spacing, |i, pieces| {
+        for f in pieces {
+            out.push((i, f));
+        }
+    });
+    out
+}
+
+/// [`cut_rows`] streamed: `row` is called once per line that has pieces,
+/// with the index of the line and the pieces of that line, as the sweep
+/// advances. Only one line's active-edge bookkeeping is alive at a time.
+fn cut_rows_into(
+    rings: &[Vec<Pt>],
+    frame: Frame,
+    first: f64,
+    count: usize,
+    spacing: f64,
+    mut row: impl FnMut(usize, Vec<Fragment>),
+) {
     struct Edge {
         lo: f64,
         hi: f64,
@@ -115,7 +135,6 @@ fn cut_rows(rings: &[Vec<Pt>], frame: Frame, first: f64, count: usize, spacing: 
     }
     edges.sort_by(|a, b| a.lo.total_cmp(&b.lo));
 
-    let mut out = Vec::new();
     let mut active: Vec<usize> = Vec::new();
     let mut next = 0;
     let mut cuts: Vec<(f64, OnEdge)> = Vec::new();
@@ -133,14 +152,17 @@ fn cut_rows(rings: &[Vec<Pt>], frame: Frame, first: f64, count: usize, spacing: 
             cuts.push((p.0 + t * (q.0 - p.0), at));
         }
         cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut pieces: Vec<Fragment> = Vec::new();
         for &[(ua, ea), (ub, eb)] in cuts.as_chunks::<2>().0 {
             if ub - ua < MIN_SEGMENT_MM {
                 continue;
             }
-            out.push((i, Fragment { line: vec![frame.page(ua, v), frame.page(ub, v)], ends: [ea, eb] }));
+            pieces.push(Fragment { line: vec![frame.page(ua, v), frame.page(ub, v)], ends: [ea, eb] });
+        }
+        if !pieces.is_empty() {
+            row(i, pieces);
         }
     }
-    out
 }
 
 fn strokes_of(fragments: Vec<Fragment>) -> Strokes {
@@ -179,17 +201,47 @@ pub fn sweep_anchored(region: &Region, spacing: f64, angle: f64, anchor: Anchor)
 
 /// [`sweep_anchored`], each line with the outline edges its ends lie on.
 pub fn sweep_anchored_fragments(region: &Region, spacing: f64, angle: f64, anchor: Anchor) -> Vec<Fragment> {
+    let mut out = Vec::new();
+    sweep_anchored_fragments_into(region, spacing, angle, anchor, |f| out.push(f));
+    out
+}
+
+/// [`sweep_anchored_fragments`] streamed: one line of the family at a time,
+/// in order across the family. The memory peak is a single row's pieces.
+pub fn sweep_anchored_fragments_into(
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    anchor: Anchor,
+    mut sink: impl FnMut(Fragment),
+) {
     if !usable(region, spacing) {
-        return vec![];
+        return;
     }
-    if anchor == Anchor::LOCAL {
-        return fragments_local(region, spacing, angle);
-    }
+    let rings = region.all_rings_mm();
     let frame = Frame::new(angle);
-    let (lo, hi) = extent(&region.all_rings_mm(), frame);
-    let (_, first) = centred(lo, hi, spacing);
-    let own = (-first * frame.sin, first * frame.cos);
-    fragments_on_lattice(region, spacing, angle, anchor.resolve(own))
+    let (lo, hi) = extent(&rings, frame);
+    let (count, first) = if anchor == Anchor::LOCAL {
+        centred(lo, hi, spacing)
+    } else {
+        let (_, own_first) = centred(lo, hi, spacing);
+        let own = (-own_first * frame.sin, own_first * frame.cos);
+        through(lo, hi, spacing, frame.v(anchor.resolve(own)))
+    };
+    cut_rows_into(&rings, frame, first, count, spacing, |_, pieces| {
+        for f in pieces {
+            sink(f);
+        }
+    });
+}
+
+/// [`sweep_anchored`] streamed: pieces are emitted line by line, clipped as
+/// they come (the sweep already produces them inside the region).
+pub fn sweep_anchored_into(region: &Region, spacing: f64, angle: f64, anchor: Anchor, sink: &mut dyn crate::Sink) {
+    if !usable(region, spacing) {
+        return;
+    }
+    sweep_anchored_fragments_into(region, spacing, angle, anchor, |f| sink.stroke(f.line));
 }
 
 /// Like [`sweep_lines`], but one of the lines passes through `through`.
@@ -297,6 +349,22 @@ mod tests {
         assert_eq!(plain.len(), shifted.len());
         for (a, b) in plain.iter().zip(&shifted) {
             assert!((b[0].1 - a[0].1 - 0.25).abs() < 1e-9, "{a:?} vs {b:?}");
+        }
+    }
+
+    #[test]
+    fn streamed_sweep_equals_the_one_shot() {
+        let region = Region::from_polygons(&[vec![
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            vec![(6.0, 6.0), (14.0, 6.0), (14.0, 14.0), (6.0, 14.0)],
+        ]]);
+        for anchor in [Anchor::LOCAL, Anchor::GLOBAL, Anchor::global(3.3, 4.4)] {
+            for angle in [0.0, 30.0, 90.0] {
+                let direct = sweep_anchored(&region, 0.9, angle, anchor);
+                let mut streamed: Strokes = Vec::new();
+                sweep_anchored_into(&region, 0.9, angle, anchor, &mut streamed);
+                assert_eq!(direct, streamed, "anchor {anchor:?} angle {angle}");
+            }
         }
     }
 }

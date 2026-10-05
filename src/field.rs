@@ -115,14 +115,29 @@ pub fn fill_profile(
     anchor: Anchor,
     profile: impl Fn(f64) -> f64,
 ) -> Strokes {
+    let mut out = Vec::new();
+    fill_profile_into(region, spacing, angle, anchor, profile, &mut out);
+    out
+}
+
+/// [`fill_profile`] streamed: one row of the family at a time, clipped and
+/// handed to `sink` before the next is built. The memory peak is a single
+/// row's samples, not the whole family.
+pub fn fill_profile_into(
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    anchor: Anchor,
+    profile: impl Fn(f64) -> f64,
+    sink: &mut dyn crate::Sink,
+) {
     if spacing <= 0.0 || region.is_empty() {
-        return vec![];
+        return;
     }
     let frame = Frame::anchored(anchor, centre(region), angle);
     let step = (spacing / 8.0).clamp(0.05, 0.5);
     let (u0, u1, v0, v1) = frame.span(region, spacing);
     let samples = indices(u0, u1, step);
-    let mut out: Strokes = Vec::new();
     for k in indices(v0, v1, spacing) {
         let y = k as f64 * spacing;
         let pts: Vec<Pt> = samples
@@ -132,9 +147,10 @@ pub fn fill_profile(
                 frame.world((x, y + profile(x)))
             })
             .collect();
-        out.extend(region.clip_polyline(&simplify(&pts, 0.01)));
+        for cut in region.clip_polyline(&simplify(&pts, 0.01)) {
+            sink.stroke(cut);
+        }
     }
-    out
 }
 
 /// Join segments sharing grid edges into polylines (each grid edge is

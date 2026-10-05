@@ -6,7 +6,7 @@
 
 use crate::anchor::{centre, Anchor};
 use crate::geo::{Region, Strokes};
-use crate::sweep::{sweep_anchored, sweep_lines_through};
+use crate::sweep::sweep_lines_through;
 
 /// The region the lines are cut to.
 fn target(region: &Region, spacing: f64, anchor: Anchor) -> Region {
@@ -19,17 +19,30 @@ fn target(region: &Region, spacing: f64, anchor: Anchor) -> Region {
 
 /// One family of lines, unjoined.
 pub fn fill_lines(region: &Region, spacing: f64, angle: f64, anchor: Anchor) -> Strokes {
+    let mut out = Vec::new();
+    fill_lines_into(region, spacing, angle, anchor, &mut out);
+    out
+}
+
+/// [`fill_lines`] streamed: one scanline at a time.
+pub fn fill_lines_into(region: &Region, spacing: f64, angle: f64, anchor: Anchor, sink: &mut dyn crate::Sink) {
     if region.is_empty() || spacing <= 0.0 {
-        return vec![];
+        return;
     }
-    sweep_anchored(&target(region, spacing, anchor), spacing, angle, anchor)
+    crate::sweep::sweep_anchored_into(&target(region, spacing, anchor), spacing, angle, anchor, sink);
 }
 
 /// Two families, at `angle` and `angle + 90`.
 pub fn fill_grid(region: &Region, spacing: f64, angle: f64, anchor: Anchor) -> Strokes {
-    let mut out = fill_lines(region, spacing, angle, anchor);
-    out.extend(fill_lines(region, spacing, angle + 90.0, anchor));
+    let mut out = Vec::new();
+    fill_grid_into(region, spacing, angle, anchor, &mut out);
     out
+}
+
+/// [`fill_grid`] streamed: the `angle` family, then the `angle + 90` one.
+pub fn fill_grid_into(region: &Region, spacing: f64, angle: f64, anchor: Anchor, sink: &mut dyn crate::Sink) {
+    fill_lines_into(region, spacing, angle, anchor, sink);
+    fill_lines_into(region, spacing, angle + 90.0, anchor, sink);
 }
 
 /// Three families 60° apart through one point, closing into equilateral

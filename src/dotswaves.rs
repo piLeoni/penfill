@@ -41,8 +41,27 @@ pub fn fill_dots_with_lattice(
     lattice: Lattice,
     anchor: Anchor,
 ) -> Strokes {
+    let mut out = Vec::new();
+    fill_dots_with_lattice_into(region, interval, angle, mark, lattice, anchor, &mut out);
+    out
+}
+
+/// [`fill_dots_with_lattice`] streamed: rows are emitted to `sink` as they
+/// are made, so the peak is one row of marks, not the whole screen.
+///
+/// With a local anchor the whole mark is kept or dropped and rows arrive as
+/// batches; with a global anchor each row is clipped before it is handed on.
+pub fn fill_dots_with_lattice_into(
+    region: &Region,
+    interval: f64,
+    angle: f64,
+    mark: f64,
+    lattice: Lattice,
+    anchor: Anchor,
+    sink: &mut dyn crate::Sink,
+) {
     if interval <= 0.0 || region.is_empty() {
-        return vec![];
+        return;
     }
     let row_pitch = match lattice {
         Lattice::Square => interval,
@@ -50,8 +69,13 @@ pub fn fill_dots_with_lattice(
     };
     let frame = Frame::anchored(anchor, centre(region), angle);
     let (u0, u1, v0, v1) = frame.span(region, interval);
-    let mut raw: Strokes = Vec::new();
+    let mut row: Strokes = Vec::new();
+    let mut last = i64::MIN;
     for j in indices(v0, v1, row_pitch) {
+        if j != last && !row.is_empty() {
+            emit_row(region, anchor, std::mem::take(&mut row), sink);
+        }
+        last = j;
         let offset = match lattice {
             Lattice::Hexagonal if j.rem_euclid(2) == 1 => interval / 2.0,
             _ => 0.0,
@@ -59,13 +83,25 @@ pub fn fill_dots_with_lattice(
         let v = j as f64 * row_pitch;
         for i in indices(u0, u1, interval) {
             let u = i as f64 * interval + offset;
-            raw.push(vec![frame.world((u - mark / 2.0, v)), frame.world((u + mark / 2.0, v))]);
+            row.push(vec![frame.world((u - mark / 2.0, v)), frame.world((u + mark / 2.0, v))]);
         }
     }
+    if !row.is_empty() {
+        emit_row(region, anchor, row, sink);
+    }
+}
+
+/// A local lattice keeps whole marks and filters by point; a global one is
+/// cut at the boundary so neighbouring regions share the mark.
+fn emit_row(region: &Region, anchor: Anchor, row: Strokes, sink: &mut dyn crate::Sink) {
     if anchor.is_global() {
-        region.clip_strokes(&raw)
+        for s in row {
+            for cut in region.clip_polyline(&s) {
+                sink.stroke(cut);
+            }
+        }
     } else {
-        filter_inside(raw, region)
+        sink.batch(filter_inside(row, region));
     }
 }
 
@@ -73,8 +109,15 @@ pub fn fill_dots_with_lattice(
 /// (`wavelength = interval / 4`, `frequency = π / wavelength / 8`).
 /// Port of `waves_pattern`; the local lattice is centred on the region.
 pub fn fill_waves(region: &Region, interval: f64, angle: f64, anchor: Anchor) -> Strokes {
+    let mut out = Vec::new();
+    fill_waves_into(region, interval, angle, anchor, &mut out);
+    out
+}
+
+/// [`fill_waves`] streamed: one wavy row at a time.
+pub fn fill_waves_into(region: &Region, interval: f64, angle: f64, anchor: Anchor, sink: &mut dyn crate::Sink) {
     if interval <= 0.0 || region.is_empty() {
-        return vec![];
+        return;
     }
     let frame = Frame::anchored(anchor, centre(region), angle);
     let wavelength = interval / 4.0;
@@ -82,7 +125,6 @@ pub fn fill_waves(region: &Region, interval: f64, angle: f64, anchor: Anchor) ->
 
     let (u0, u1, v0, v1) = frame.span(region, interval);
     let samples = indices(u0, u1, STEP);
-    let mut raw: Strokes = Vec::new();
     for k in indices(v0, v1, interval) {
         let v = k as f64 * interval;
         let coords: Vec<(f64, f64)> = samples
@@ -92,9 +134,10 @@ pub fn fill_waves(region: &Region, interval: f64, angle: f64, anchor: Anchor) ->
                 frame.world((u, v + (u * frequency_scale).sin() * wavelength))
             })
             .collect();
-        raw.push(coords);
+        for cut in region.clip_polyline(&coords) {
+            sink.stroke(cut);
+        }
     }
-    region.clip_strokes(&raw)
 }
 
 /// Ogee, the curved-diamond wallpaper lattice: two sets of waves running
@@ -206,5 +249,20 @@ mod tests {
     fn angle_rotates_dots() {
         let strokes = fill_dots(&blob(), 2.0, 30.0, 0.3, Anchor::LOCAL);
         assert!(!strokes.is_empty());
+    }
+
+    #[test]
+    fn streamed_dots_equal_the_one_shot_fill() {
+        for lattice in [Lattice::Square, Lattice::Hexagonal] {
+            for anchor in [Anchor::LOCAL, Anchor::GLOBAL] {
+                for angle in [0.0, 45.0] {
+                    let region = blob();
+                    let direct = fill_dots_with_lattice(&region, 0.7, angle, 0.25, lattice, anchor);
+                    let mut streamed: Strokes = Vec::new();
+                    fill_dots_with_lattice_into(&region, 0.7, angle, 0.25, lattice, anchor, &mut streamed);
+                    assert_eq!(direct, streamed, "lattice {lattice:?} anchor {anchor:?} angle {angle}");
+                }
+            }
+        }
     }
 }

@@ -4,19 +4,33 @@
 
 use crate::anchor::Anchor;
 use crate::geo::{Region, Strokes};
-use crate::sweep::sweep_anchored;
+use crate::sweep::{sweep_anchored, sweep_anchored_into};
 
 /// One stroke per piece of each line, `inset_mm` (default half the spacing)
 /// in from the walls.
 pub fn fill_rectilinear(region: &Region, spacing: f64, angle: f64, inset_mm: Option<f64>, anchor: Anchor) -> Strokes {
+    let mut out = Vec::new();
+    fill_rectilinear_into(region, spacing, angle, inset_mm, anchor, &mut out);
+    out
+}
+
+/// [`fill_rectilinear`] streamed: one scanline at a time.
+pub fn fill_rectilinear_into(
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    inset_mm: Option<f64>,
+    anchor: Anchor,
+    sink: &mut dyn crate::Sink,
+) {
     if region.is_empty() || spacing <= 0.0 {
-        return vec![];
+        return;
     }
     let target = region.inset(inset_mm.unwrap_or(spacing / 2.0));
     if target.is_empty() {
-        return vec![];
+        return;
     }
-    sweep_anchored(&target, spacing, angle, anchor)
+    sweep_anchored_into(&target, spacing, angle, anchor, sink);
 }
 
 /// The same lines right up to the walls.

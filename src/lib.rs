@@ -30,6 +30,7 @@ pub mod scales;
 pub mod scribble;
 pub mod spiral;
 pub mod stipple;
+pub mod stream;
 pub mod svg;
 pub mod sweep;
 pub mod terrazzo;
@@ -40,3 +41,4 @@ pub mod zigzag;
 
 pub use anchor::{Anchor, Origin};
 pub use geo::{polyline_length, Region, Strokes};
+pub use stream::{Clipped, Meter, Sink};
