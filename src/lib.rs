@@ -16,6 +16,7 @@ pub mod field;
 pub mod geo;
 pub mod grass;
 pub mod hilbert;
+pub mod isoline_blobs;
 pub mod gravel;
 pub mod grid;
 pub mod honeycomb;
@@ -44,5 +45,6 @@ pub mod zigzag;
 
 pub use anchor::{Anchor, Origin};
 pub use geo::{polyline_length, Region, Strokes};
+pub use isoline_blobs::{fill_isoline_blobs, fill_isoline_blobs_with_coverage, FillWithCoverage, IsolineBlobParams, SiteSource};
 pub use solid::fill_solid;
 pub use stream::{Clipped, Meter, Sink};

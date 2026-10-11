@@ -12,6 +12,7 @@ use penfill::{
     placement::Placement,
     dotswaves::{fill_dots, fill_dots_with_lattice, fill_wave_grid, fill_waves, Lattice},
     field::{fill_isolines, fill_profile, levels_every},
+    isoline_blobs::{default_params, fill_isoline_blobs_with_coverage},
     radial::fill_sunburst,
     svg::{fill_svg_placed, fill_svg_tile, parse_svg},
     terrazzo::fill_terrazzo,
@@ -629,6 +630,18 @@ fn patterns() -> Vec<Pattern> {
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
             fill: |r, s, a, inset| fill_honeycomb(&r.inset(inset), s, a, 0.0, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "isoline blobs",
+            slug: "isoline-blobs",
+            note: "nested contour stacks per scattered site (see draw.land reference art)",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| {
+                let p = default_params(s, s * 0.35, SEED);
+                fill_isoline_blobs_with_coverage(&r.inset(inset), &p).strokes
+            },
         },
         Pattern {
             name: "hornblende",

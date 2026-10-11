@@ -61,6 +61,12 @@ Poisson-disk / Voronoi based. Take no anchor.
 | `scribble.rs` | `fill_scribble` | two layers (2nd turned ~70–110°), per-line tilt/spacing error, broken into strokes — hand hatching |
 | `nature.rs` | `fill_pebbles`, `fill_leaves`, `fill_sprouts`, `fill_lily_pads`, `fill_canopy`, `fill_fluid_grass` | site-plan vector textures; `fill_leaves` delegates to `fill_sprouts` |
 
+## Isoline blobs (design / in progress)
+
+| Module | Fill(s) | Notes |
+| --- | --- | --- |
+| `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage` | nested contours per scattered site; returns mask `coverage` — see [isoline-blob-fills.md](isoline-blob-fills.md) |
+
 ## Texture (built on `field.rs`)
 
 | Module | Fill(s) | Notes |
