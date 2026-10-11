@@ -45,6 +45,8 @@ pub mod zigzag;
 
 pub use anchor::{Anchor, Origin};
 pub use geo::{polyline_length, Region, Strokes};
-pub use isoline_blobs::{fill_isoline_blobs, fill_isoline_blobs_with_coverage, FillWithCoverage, IsolineBlobParams, SiteSource};
+pub use isoline_blobs::{
+    fill_isoline_blobs, fill_isoline_blobs_with_coverage, FieldSite, FieldSource, FillWithCoverage, IsolineFieldParams,
+};
 pub use solid::fill_solid;
 pub use stream::{Clipped, Meter, Sink};

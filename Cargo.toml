@@ -40,6 +40,9 @@ name = "penfill"
 name = "gallery"
 required-features = ["image"]
 
+[[example]]
+name = "isoline_blobs_demo"
+
 [profile.release]
 lto = true
 codegen-units = 1
