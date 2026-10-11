@@ -1,0 +1,24 @@
+{
+  "page": { "width": 152.4, "height": 101.6 },
+  "margin": 6.0,
+  "gap": 2.0,
+  "columns": 6,
+  "cell_size": 15,
+  "inset": 1.5,
+  "label_height": 4.5,
+  "stroke_width": 0.3,
+  "outline": "#b7aea3",
+  "ink": "#2a2622",
+  "text": "#6b645c",
+  "font_size": 1.8,
+  "label": "name  spacing",
+  "patterns": [
+    { "name": "zigzag", "spacing": 0.5, "angle": 45 },
+    { "name": "zigzag", "spacing": 0.75, "angle": 45 },
+    { "name": "zigzag", "spacing": 1.0, "angle": 45 },
+    { "name": "dots hex", "lattice": "hex", "spacing": 0.5 },
+    { "name": "dots hex", "lattice": "hex", "spacing": 0.75 },
+    { "name": "dots hex", "lattice": "hex", "spacing": 1.0 }
+
+  ]
+}

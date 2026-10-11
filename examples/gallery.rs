@@ -15,6 +15,19 @@ use penfill::{
     radial::fill_sunburst,
     svg::{fill_svg_placed, fill_svg_tile, parse_svg},
     terrazzo::fill_terrazzo,
+    litho::{
+        fill_amphibolite, fill_arena, fill_beds, fill_benton, fill_breccia, fill_breccia2, fill_brackets,
+        fill_coal, fill_conglomerate, fill_conglomerate2, fill_coquina, fill_coarse_stone, fill_cracked_earth,
+        fill_dacite, fill_diabase, fill_diatom, fill_diorite, fill_drift, fill_erosion, fill_feldspar, fill_ferrous,
+        fill_fill, fill_fine_gravel, fill_gabbro, fill_gneiss, fill_grainy_soil, fill_granite,
+        fill_granite2, fill_gravelly_soil, fill_hornblende, fill_laminae, fill_lava, fill_layered_soil,
+        fill_masonry, fill_mixed_rocks, fill_mulch, fill_ophitic, fill_pebble_scatter,
+        fill_pebbled_soil, fill_shards, fill_silty_soil, fill_stone_cluster,
+        fill_chalky_soil, fill_clay_soil, fill_dry_cracked, fill_topsoil,
+        fill_loose_soil, fill_compacted_soil, fill_sandy_soil, fill_mulched_soil, fill_debris_soil,
+        fill_sandstone,
+    },
+    nature::{fill_canopy, fill_fluid_grass, fill_leaves, fill_lily_pads, fill_pebbles},
     textures::{fill_cracks, fill_marble, fill_wood},
     grass::fill_grass,
     gravel::{fill_gravel, fill_gravel_with, GravelEdge},
@@ -141,63 +154,160 @@ struct Pattern {
     fill: fn(&Region, f64, f64, f64) -> Strokes,
 }
 
+/// Same entries, but in name order so the catalog sheet reads like an index.
+fn patterns_sorted() -> Vec<Pattern> {
+    let mut p = patterns();
+    p.sort_by_key(|p| p.name.to_lowercase());
+    p
+}
+
 fn patterns() -> Vec<Pattern> {
     vec![
         Pattern {
-            name: "rectilinear",
-            slug: "rectilinear",
-            note: "parallel lines, one stroke each",
+            name: "amphibolite",
+            slug: "amphibolite",
+            note: "continuous vertical zigzag",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_amphibolite(&r.inset(inset), s * 1.6, SEED),
+        },
+        Pattern {
+            name: "arena",
+            slug: "arena",
+            note: "fine dot stipple",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_arena(&r.inset(inset), s * 0.9, SEED),
+        },
+        Pattern {
+            name: "basket",
+            slug: "basket",
+            note: "CAD .pat basket weave",
             has_angle: true,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_rectilinear(r, s, a, Some(inset), Anchor::LOCAL),
+            fill: |r, s, a, inset| fill_pat(&r.inset(inset), &builtin("BASKET").unwrap(), s, a, Anchor::LOCAL),
         },
         Pattern {
-            name: "diagonal",
-            slug: "diagonal",
-            note: "rectilinear at 45°",
-            has_angle: true,
-            default_angle: 45.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_rectilinear(r, s, a, Some(inset), Anchor::LOCAL),
-        },
-        Pattern {
-            name: "zigzag",
-            slug: "zigzag",
-            note: "serpentine hatch, pen up when the join is too long",
-            has_angle: true,
-            default_angle: ZIGZAG_ANGLE,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_zigzag_inset(r, s, a, Some(inset), Anchor::LOCAL),
-        },
-        Pattern {
-            name: "grid",
-            slug: "grid",
-            note: "two hatches, 90° apart",
-            has_angle: true,
-            default_angle: 45.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, _| fill_grid(r, s, a, Anchor::LOCAL),
-        },
-        Pattern {
-            name: "triangles",
-            slug: "triangles",
-            note: "three hatches 60° apart meeting at shared points, triangle height 1.5 × spacing",
+            name: "beds",
+            slug: "beds",
+            note: "continuous wavy horizons",
             has_angle: true,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            // fill_triangles keeps half its own pitch (0.75 s) off the wall;
-            // growing by 0.25 s first leaves the gallery's usual s / 2.
-            fill: |r, s, a, _| fill_triangles(&r.outset(s * 0.25), s * 1.5, a, Anchor::LOCAL),
+            fill: |r, s, a, inset| fill_beds(&r.inset(inset), s * 1.4, a, SEED),
         },
         Pattern {
-            name: "honeycomb",
-            slug: "honeycomb",
-            note: "hexagon cells",
+            name: "bentonite",
+            slug: "bentonite",
+            note: "vertical dashed columns",
+            has_angle: true,
+            default_angle: 90.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_benton(&r.inset(inset), s * 1.4, a, SEED),
+        },
+        Pattern {
+            name: "brackets",
+            slug: "brackets",
+            note: "orthogonal └ ┘ marks",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_brackets(&r.inset(inset), s * 1.2, SEED),
+        },
+        Pattern {
+            name: "breccia",
+            slug: "breccia",
+            note: "angular Voronoi fragments, narrow gaps",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_breccia(&r.inset(inset), s * 2.2, SEED),
+        },
+        Pattern {
+            name: "breccia blobs",
+            slug: "breccia-blobs",
+            note: "rounded low-frequency fragments",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_breccia2(&r.inset(inset), s * 2.0, SEED),
+        },
+        Pattern {
+            name: "bricks",
+            slug: "bricks",
+            note: "CAD .pat running bond, brick height 2 × spacing",
             has_angle: true,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_honeycomb(&r.inset(inset), s, a, 0.0, Anchor::LOCAL),
+            fill: |r, s, a, inset| {
+                fill_pat(&r.inset(inset), &builtin("BRICK").unwrap(), s * 2.0, a, Anchor::LOCAL)
+            },
+        },
+        Pattern {
+            name: "canopy",
+            slug: "canopy",
+            note: "clustered wobbly lobes with a centre dot per lobe",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_canopy(&r.inset(inset), s * 2.5, SEED),
+        },
+        Pattern {
+            name: "chalky soil",
+            slug: "chalky-soil",
+            note: "pale granular dots with a very open cell net",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_chalky_soil(&r.inset(inset), s * 1.1, SEED)
+        },
+        Pattern {
+            name: "chess",
+            slug: "chess",
+            note: "squares 4 × spacing, dark ones outlined and hatched at half the spacing",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_chess(&r.inset(inset), s * 4.0, s * 0.5, a, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "clay soil",
+            slug: "clay-soil",
+            note: "smooth broad waves",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, a, inset| fill_clay_soil(&r.inset(inset), s * 0.7, a, SEED),
+        },
+        Pattern {
+            name: "coal",
+            slug: "coal",
+            note: "dashed bedding seams",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_coal(&r.inset(inset), s * 1.2, a, SEED),
+        },
+        Pattern {
+            name: "coarse stone",
+            slug: "coarse-stone",
+            note: "a few large rounded block outlines",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_coarse_stone(&r.inset(inset), s * 1.6, SEED),
+        },
+        Pattern {
+            name: "compacted soil",
+            slug: "compacted-soil",
+            note: "tight thin waves pressed together",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, a, inset| fill_compacted_soil(&r.inset(inset), s * 1.2, a, SEED)
         },
         Pattern {
             name: "concentric",
@@ -209,31 +319,103 @@ fn patterns() -> Vec<Pattern> {
             fill: |r, s, _, inset| fill_concentric(r, s, Some(inset)),
         },
         Pattern {
-            name: "spiral",
-            slug: "spiral",
-            note: "concentric rings joined into one path",
+            name: "conglomerate",
+            slug: "conglomerate",
+            note: "round pebbles on a staggered grid",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, _| fill_spiral(r, s),
+            fill: |r, s, _, inset| fill_conglomerate(&r.inset(inset), s * 1.4, SEED),
         },
         Pattern {
-            name: "hilbert",
-            slug: "hilbert",
-            note: "space-filling curve, one pen-down path",
+            name: "conglomerate flat",
+            slug: "conglomerate-flat",
+            note: "horizontally squashed pebbles",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| fill_hilbert(r, s, Some(inset)),
+            fill: |r, s, _, inset| fill_conglomerate2(&r.inset(inset), s * 1.4, SEED),
         },
         Pattern {
-            name: "sunburst",
-            slug: "sunburst",
-            note: "rays from the centre, staggered so they stay about the spacing apart",
+            name: "coquina",
+            slug: "coquina",
+            note: "shell spirals in rows",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_sunburst(&r.inset(inset), s, a, Anchor::LOCAL),
+            fill: |r, s, _, inset| fill_coquina(&r.inset(inset), s * 2.0, SEED),
+        },
+        Pattern {
+            name: "cracked earth",
+            slug: "cracked-earth",
+            note: "fine dots with a tight angular cell net on top",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_cracked_earth(&r.inset(inset), s * 1.4, SEED),
+        },
+        Pattern {
+            name: "cracks",
+            slug: "cracks",
+            note: "parched ground: rounded cellular tile (wide grout), ~4 × spacing across",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_cracks(&r.inset(inset), s * 4.0, SEED),
+        },
+        Pattern {
+            name: "dacite",
+            slug: "dacite",
+            note: "short crystal dashes at the angle",
+            has_angle: true,
+            default_angle: 35.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_dacite(&r.inset(inset), s * 0.8, a, SEED),
+        },
+        Pattern {
+            name: "debris soil",
+            slug: "debris-soil",
+            note: "tiny chips and specks from crushed rock",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_debris_soil(&r.inset(inset), s * 1.2, SEED)
+        },
+        Pattern {
+            name: "diabase",
+            slug: "diabase",
+            note: "dense parallel hatch (angle = direction)",
+            has_angle: true,
+            default_angle: -45.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_diabase(&r.inset(inset), s * 0.6, a, SEED),
+        },
+        Pattern {
+            name: "diagonal",
+            slug: "diagonal",
+            note: "rectilinear at 45°",
+            has_angle: true,
+            default_angle: 45.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_rectilinear(r, s, a, Some(inset), Anchor::LOCAL),
+        },
+        Pattern {
+            name: "diatom",
+            slug: "diatom",
+            note: "concentric micro-motifs: circle + inner ring + dot",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_diatom(&r.inset(inset), s * 2.0, SEED),
+        },
+        Pattern {
+            name: "diorite",
+            slug: "diorite",
+            note: "igneous: T marks",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_diorite(&r.inset(inset), s * 1.2, SEED),
         },
         Pattern {
             name: "dots",
@@ -256,53 +438,121 @@ fn patterns() -> Vec<Pattern> {
             },
         },
         Pattern {
-            name: "waves",
-            slug: "waves",
-            note: "wavy hatch",
+            name: "drift",
+            slug: "drift",
+            note: "sparse tilted pebbles",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_drift(&r.inset(inset), s * 2.0, SEED),
+        },
+        Pattern {
+            name: "dry cracked soil",
+            slug: "dry-cracked-soil",
+            note: "wide mud-crack polygons with rounded gaps",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_dry_cracked(&r.inset(inset), s * 1.1, SEED)
+        },
+        Pattern {
+            name: "erosion lines",
+            slug: "erosion-lines",
+            note: "many low-amplitude parallel waves",
             has_angle: true,
             default_angle: 0.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_waves(&r.inset(inset), s, a, Anchor::LOCAL),
+            preview_spacing: FINE_MM,
+            fill: |r, s, a, inset| fill_erosion(&r.inset(inset), s * 0.5, a, SEED),
         },
         Pattern {
-            name: "wave grid",
-            slug: "wave-grid",
-            note: "ogee: mirrored waves closing into curved diamonds, rows 1.5 × spacing apart",
+            name: "feldspar",
+            slug: "feldspar",
+            note: "dense short crystal strokes",
             has_angle: true,
-            default_angle: 90.0,
+            default_angle: -45.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_wave_grid(&r.inset(inset), s * 1.5, a, Anchor::LOCAL),
+            fill: |r, s, a, inset| fill_feldspar(&r.inset(inset), s * 0.9, a, SEED),
         },
         Pattern {
-            name: "stipple",
-            slug: "stipple",
-            note: "Poisson-disk dots, never closer than the spacing",
+            name: "ferrous",
+            slug: "ferrous",
+            note: "checkerboard cells",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| fill_stipple(&r.inset(inset), s, s * 0.3, SEED),
+            fill: |r, s, _, inset| fill_ferrous(&r.inset(inset), s * 1.0, SEED),
         },
         Pattern {
-            name: "stipple noise",
-            slug: "stipple-noise",
-            note: "density drifts with Perlin noise, 0.6–3 × spacing apart, blobs about 12 mm",
+            name: "fill",
+            slug: "fill",
+            note: "woven cross hatch",
+            has_angle: true,
+            default_angle: 45.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_fill(&r.inset(inset), s * 0.8, a, SEED),
+        },
+        Pattern {
+            name: "fine gravel",
+            slug: "fine-gravel",
+            note: "sparse dots with scattered small rings",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| {
-                fill_stipple_noise(&r.inset(inset), s * 0.6, s * 3.0, s * 0.25, 12.0, SEED)
-            },
+            fill: |r, s, _, inset| fill_fine_gravel(&r.inset(inset), s * 1.5, SEED),
         },
         Pattern {
-            name: "stipple edge",
-            slug: "stipple-edge",
-            note: "dense at the walls, thinning over 8 mm, roughened by noise",
+            name: "fluid grass",
+            slug: "fluid-grass",
+            note: "short strokes aligned to a smooth vector field",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| {
-                fill_stipple_edge(&r.inset(inset), s * 0.6, s * 3.0, s * 0.25, 8.0, 0.5, SEED)
-            },
+            fill: |r, s, _, inset| fill_fluid_grass(&r.inset(inset), s * 1.35, SEED),
+        },
+        Pattern {
+            name: "gabbro",
+            slug: "gabbro",
+            note: "igneous: alternating V marks",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_gabbro(&r.inset(inset), s * 1.2, SEED),
+        },
+        Pattern {
+            name: "gneiss",
+            slug: "gneiss",
+            note: "foliation: aligned dash rows (strike = angle)",
+            has_angle: true,
+            default_angle: 30.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_gneiss(&r.inset(inset), s * 1.6, a, SEED),
+        },
+        Pattern {
+            name: "grainy soil",
+            slug: "grainy-soil",
+            note: "dense fine dot field",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_grainy_soil(&r.inset(inset), s * 0.55, SEED),
+        },
+        Pattern {
+            name: "granite",
+            slug: "granite",
+            note: "igneous: + on a staggered grid",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_granite(&r.inset(inset), s * 1.2, SEED),
+        },
+        Pattern {
+            name: "granite ×",
+            slug: "granite-x",
+            note: "igneous: diagonal × grain",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_granite2(&r.inset(inset), s * 1.2, SEED),
         },
         Pattern {
             name: "grass",
@@ -334,42 +584,22 @@ fn patterns() -> Vec<Pattern> {
             },
         },
         Pattern {
-            name: "scribble",
-            slug: "scribble",
-            note: "hand-drawn cross-hatch, jittered and broken",
-            has_angle: true,
-            default_angle: 30.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_scribble(&r.inset(inset), s, a, SEED),
+            name: "gravelly soil",
+            slug: "gravelly-soil",
+            note: "dense short dashes at scattered angles",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_gravelly_soil(&r.inset(inset), s, SEED),
         },
         Pattern {
-            name: "truchet",
-            slug: "truchet",
-            note: "random quarter arcs, cells 3 × spacing",
+            name: "grid",
+            slug: "grid",
+            note: "two hatches, 90° apart",
             has_angle: true,
-            default_angle: 0.0,
+            default_angle: 45.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_truchet(&r.inset(inset), s * 3.0, a, SEED, Anchor::LOCAL),
-        },
-        Pattern {
-            name: "scales",
-            slug: "scales",
-            note: "rows of half circles resting on the row below, rows 1.5 × spacing apart, one stroke per row",
-            has_angle: true,
-            default_angle: 0.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_scales(&r.inset(inset), s * 1.5, a, Anchor::LOCAL),
-        },
-        Pattern {
-            name: "bricks",
-            slug: "bricks",
-            note: "CAD .pat running bond, brick height 2 × spacing",
-            has_angle: true,
-            default_angle: 0.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| {
-                fill_pat(&r.inset(inset), &builtin("BRICK").unwrap(), s * 2.0, a, Anchor::LOCAL)
-            },
+            fill: |r, s, a, _| fill_grid(r, s, a, Anchor::LOCAL),
         },
         Pattern {
             name: "herringbone",
@@ -383,31 +613,76 @@ fn patterns() -> Vec<Pattern> {
             },
         },
         Pattern {
-            name: "basket",
-            slug: "basket",
-            note: "CAD .pat basket weave",
-            has_angle: true,
-            default_angle: 0.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_pat(&r.inset(inset), &builtin("BASKET").unwrap(), s, a, Anchor::LOCAL),
-        },
-        Pattern {
-            name: "chess",
-            slug: "chess",
-            note: "squares 4 × spacing, dark ones outlined and hatched at half the spacing",
-            has_angle: true,
-            default_angle: 0.0,
-            preview_spacing: COARSE_MM,
-            fill: |r, s, a, inset| fill_chess(&r.inset(inset), s * 4.0, s * 0.5, a, Anchor::LOCAL),
-        },
-        Pattern {
-            name: "terrazzo",
-            slug: "terrazzo",
-            note: "chips up to 4 × spacing, a third of them dark and hatched",
+            name: "hilbert",
+            slug: "hilbert",
+            note: "space-filling curve, one pen-down path",
             has_angle: false,
             default_angle: 0.0,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| fill_terrazzo(&r.inset(inset), s * 4.0, s * 0.7, SEED),
+            fill: |r, s, _, inset| fill_hilbert(r, s, Some(inset)),
+        },
+        Pattern {
+            name: "honeycomb",
+            slug: "honeycomb",
+            note: "hexagon cells",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_honeycomb(&r.inset(inset), s, a, 0.0, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "hornblende",
+            slug: "hornblende",
+            note: "narrow crystal capsules along the angle",
+            has_angle: true,
+            default_angle: 40.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_hornblende(&r.inset(inset), s * 1.4, a, SEED),
+        },
+        Pattern {
+            name: "laminae",
+            slug: "laminae",
+            note: "fine wavy laminations",
+            has_angle: true,
+            default_angle: 15.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_laminae(&r.inset(inset), s * 1.4, a, SEED),
+        },
+        Pattern {
+            name: "lava",
+            slug: "lava",
+            note: "vertical bars of varying width",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_lava(&r.inset(inset), s * 1.4, SEED),
+        },
+        Pattern {
+            name: "layered soil",
+            slug: "layered-soil",
+            note: "stacked horizons with straighter partings",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, a, inset| fill_layered_soil(&r.inset(inset), s * 1.1, a, SEED)
+        },
+        Pattern {
+            name: "lily pads",
+            slug: "lily-pads",
+            note: "equal circles with centre dots; overlapping pads merge to one outline",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_lily_pads(&r.inset(inset), s * 1.4, SEED),
+        },
+        Pattern {
+            name: "loose soil",
+            slug: "loose-soil",
+            note: "scattered rings and dots, mostly paper",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_loose_soil(&r.inset(inset), s * 1.1, SEED)
         },
         Pattern {
             name: "marble",
@@ -419,6 +694,273 @@ fn patterns() -> Vec<Pattern> {
             fill: |r, s, a, inset| fill_marble(&r.inset(inset), s * 4.0, a, SEED, Anchor::LOCAL),
         },
         Pattern {
+            name: "masonry",
+            slug: "masonry",
+            note: "running-bond brick",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_masonry(&r.inset(inset), s * 1.0, SEED),
+        },
+        Pattern {
+            name: "mixed rocks",
+            slug: "mixed-rocks",
+            note: "stone cells across a wide size range",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_mixed_rocks(&r.inset(inset), s * 1.6, SEED),
+        },
+        Pattern {
+            name: "mulch",
+            slug: "mulch",
+            note: "staggered rows of short dashes",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_mulch(&r.inset(inset), s * 0.7, a, SEED),
+        },
+        Pattern {
+            name: "mulched soil",
+            slug: "mulched-soil",
+            note: "rows of short dashes, finer and denser than mulch",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_mulched_soil(&r.inset(inset), s * 1.1, a, SEED)
+        },
+        Pattern {
+            name: "ophitic",
+            slug: "ophitic",
+            note: "plagioclase laths crossed by pyroxene grain",
+            has_angle: true,
+            default_angle: -45.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_ophitic(&r.inset(inset), s * 0.9, a, SEED),
+        },
+        Pattern {
+            name: "organic topsoil",
+            slug: "organic-topsoil",
+            note: "dots in three size classes",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_topsoil(&r.inset(inset), s * 1.4, SEED)
+        },
+        Pattern {
+            name: "pebble scatter",
+            slug: "pebble-scatter",
+            note: "well-spaced tilted ovals",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_pebble_scatter(&r.inset(inset), s * 1.7, SEED),
+        },
+        Pattern {
+            name: "pebbled soil",
+            slug: "pebbled-soil",
+            note: "sparse small squares and diamonds",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_pebbled_soil(&r.inset(inset), s * 0.85, SEED)
+        },
+        Pattern {
+            name: "pebbles",
+            slug: "pebbles",
+            note: "small circle stones on a Poisson grid — lighter than gravel",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_pebbles(&r.inset(inset), s * 1.2, SEED),
+        },
+        Pattern {
+            name: "rectilinear",
+            slug: "rectilinear",
+            note: "parallel lines, one stroke each",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_rectilinear(r, s, a, Some(inset), Anchor::LOCAL),
+        },
+        Pattern {
+            name: "sand",
+            slug: "sand",
+            note: "fine sand: dense small dots, tighter than arena",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_arena(&r.inset(inset), s * 0.55, SEED),
+        },
+        Pattern {
+            name: "sandstone",
+            slug: "sandstone",
+            note: "dot grain with short cross-beds",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_sandstone(&r.inset(inset), s * 1.2, a, SEED),
+        },
+        Pattern {
+            name: "sandy soil",
+            slug: "sandy-soil",
+            note: "fine dense dot grain",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: FINE_MM,
+            fill: |r, s, _, inset| fill_sandy_soil(&r.inset(inset), s * 1.2, SEED)
+        },
+        Pattern {
+            name: "scales",
+            slug: "scales",
+            note: "rows of half circles resting on the row below, rows 1.5 × spacing apart, one stroke per row",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_scales(&r.inset(inset), s * 1.5, a, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "scribble",
+            slug: "scribble",
+            note: "hand-drawn cross-hatch, jittered and broken",
+            has_angle: true,
+            default_angle: 30.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_scribble(&r.inset(inset), s, a, SEED),
+        },
+        Pattern {
+            name: "shards",
+            slug: "shards",
+            note: "sparse angular shards",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_shards(&r.inset(inset), s * 2.0, SEED),
+        },
+        Pattern {
+            name: "silty soil",
+            slug: "silty-soil",
+            note: "small tight polygonal cells",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_silty_soil(&r.inset(inset), s * 2.0, SEED)
+        },
+        Pattern {
+            name: "spiral",
+            slug: "spiral",
+            note: "concentric rings joined into one path",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, _| fill_spiral(r, s),
+        },
+        Pattern {
+            name: "sprouts",
+            slug: "sprouts",
+            note: "seamless tile — offset rows of short blades and V-shaped sprouts",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_leaves(&r.inset(inset), s * 1.5, SEED),
+        },
+        Pattern {
+            name: "stipple",
+            slug: "stipple",
+            note: "Poisson-disk dots, never closer than the spacing",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_stipple(&r.inset(inset), s, s * 0.3, SEED),
+        },
+        Pattern {
+            name: "stipple edge",
+            slug: "stipple-edge",
+            note: "dense at the walls, thinning over 8 mm, roughened by noise",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| {
+                fill_stipple_edge(&r.inset(inset), s * 0.6, s * 3.0, s * 0.25, 8.0, 0.5, SEED)
+            },
+        },
+        Pattern {
+            name: "stipple noise",
+            slug: "stipple-noise",
+            note: "density drifts with Perlin noise, 0.6–3 × spacing apart, blobs about 12 mm",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| {
+                fill_stipple_noise(&r.inset(inset), s * 0.6, s * 3.0, s * 0.25, 12.0, SEED)
+            },
+        },
+        Pattern {
+            name: "stone cluster",
+            slug: "stone-cluster",
+            note: "tightly packed, varied pebbles",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_stone_cluster(&r.inset(inset), s, SEED),
+        },
+        Pattern {
+            name: "sunburst",
+            slug: "sunburst",
+            note: "rays from the centre, staggered so they stay about the spacing apart",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_sunburst(&r.inset(inset), s, a, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "terrazzo",
+            slug: "terrazzo",
+            note: "chips up to 4 × spacing, a third of them dark and hatched",
+            has_angle: false,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, _, inset| fill_terrazzo(&r.inset(inset), s * 4.0, s * 0.7, SEED),
+        },
+        Pattern {
+            name: "triangles",
+            slug: "triangles",
+            note: "three hatches 60° apart meeting at shared points, triangle height 1.5 × spacing",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            // fill_triangles keeps half its own pitch (0.75 s) off the wall;
+            // growing by 0.25 s first leaves the gallery's usual s / 2.
+            fill: |r, s, a, _| fill_triangles(&r.outset(s * 0.25), s * 1.5, a, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "truchet",
+            slug: "truchet",
+            note: "random quarter arcs, cells 3 × spacing",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_truchet(&r.inset(inset), s * 3.0, a, SEED, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "wave grid",
+            slug: "wave-grid",
+            note: "ogee: mirrored waves closing into curved diamonds, rows 1.5 × spacing apart",
+            has_angle: true,
+            default_angle: 90.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_wave_grid(&r.inset(inset), s * 1.5, a, Anchor::LOCAL),
+        },
+        Pattern {
+            name: "waves",
+            slug: "waves",
+            note: "wavy hatch",
+            has_angle: true,
+            default_angle: 0.0,
+            preview_spacing: COARSE_MM,
+            fill: |r, s, a, inset| fill_waves(&r.inset(inset), s, a, Anchor::LOCAL),
+        },
+        Pattern {
             name: "wood",
             slug: "wood",
             note: "grain lines 1.5 × spacing apart, wandering, flowing around knots",
@@ -428,13 +970,13 @@ fn patterns() -> Vec<Pattern> {
             fill: |r, s, a, inset| fill_wood(&r.inset(inset), s * 1.5, a, SEED, Anchor::LOCAL),
         },
         Pattern {
-            name: "cracks",
-            slug: "cracks",
-            note: "parched ground: wobbly crack net, cells about 4 × spacing across",
-            has_angle: false,
-            default_angle: 0.0,
+            name: "zigzag",
+            slug: "zigzag",
+            note: "serpentine hatch, pen up when the join is too long",
+            has_angle: true,
+            default_angle: ZIGZAG_ANGLE,
             preview_spacing: COARSE_MM,
-            fill: |r, s, _, inset| fill_cracks(&r.inset(inset), s * 4.0, SEED),
+            fill: |r, s, a, inset| fill_zigzag_inset(r, s, a, Some(inset), Anchor::LOCAL),
         },
     ]
 }
@@ -710,13 +1252,13 @@ fn render_sheet_y(title: &str, note: &str, columns: &[&str], rows: &[(String, Ve
 }
 
 fn append_cell(svg: &mut String, region: &Region, strokes: &Strokes, ox: f64, oy: f64, y_down: bool) {
-    let (minx, miny, maxx, maxy) = region.bounds_mm();
+            let (minx, miny, maxx, maxy) = region.bounds_mm();
     let pad = 8.0;
-    let w = (maxx - minx).max(1e-6);
-    let h = (maxy - miny).max(1e-6);
+            let w = (maxx - minx).max(1e-6);
+            let h = (maxy - miny).max(1e-6);
     let scale = ((CELL_W - 2.0 * pad) / w).min((CELL_H - 2.0 * pad) / h);
-    let cx = (minx + maxx) / 2.0;
-    let cy = (miny + maxy) / 2.0;
+            let cx = (minx + maxx) / 2.0;
+            let cy = (miny + maxy) / 2.0;
     let sx = ox + CELL_W / 2.0;
     let sy = oy + CELL_H / 2.0;
     let xform = format!(
@@ -728,7 +1270,7 @@ fn append_cell(svg: &mut String, region: &Region, strokes: &Strokes, ox: f64, oy
     let sw_fill = 0.22 / scale;
     let sw_wall = 0.28 / scale;
 
-    svg.push_str(&format!(
+            svg.push_str(&format!(
         "<g transform='{xform}' fill='none' stroke='{WALL}' stroke-width='{sw_wall}' stroke-linejoin='round'>\n"
     ));
     for ring in region.all_rings_mm() {
@@ -736,15 +1278,15 @@ fn append_cell(svg: &mut String, region: &Region, strokes: &Strokes, ox: f64, oy
             continue;
         }
         let d = ring
-            .iter()
-            .map(|p| format!("{:.3},{:.3}", p.0, p.1))
-            .collect::<Vec<_>>()
-            .join(" L ");
+                    .iter()
+                    .map(|p| format!("{:.3},{:.3}", p.0, p.1))
+                    .collect::<Vec<_>>()
+                    .join(" L ");
         svg.push_str(&format!("<path d='M {d} Z'/>\n"));
-    }
-    svg.push_str("</g>\n");
+            }
+            svg.push_str("</g>\n");
 
-    svg.push_str(&format!(
+                svg.push_str(&format!(
         "<g transform='{xform}' fill='none' stroke='{INK}' stroke-width='{sw_fill}' stroke-linecap='round' stroke-linejoin='round'>\n"
     ));
     for pts in strokes {
@@ -869,6 +1411,133 @@ fn render_strip_y(cells: &[(String, &Region, Strokes)], inks: &[&str], y_down: b
     svg
 }
 
+const GRID_COLS: usize = 12;
+const GRID_CELL_W: f64 = 70.0;
+const GRID_PATTERN_H: f64 = 70.0;
+const GRID_LABEL_H: f64 = 22.0;
+const GRID_PAD: f64 = 6.0;
+
+/// CADA / sheet aliases that reuse the same fill as another tile — one cell, both names.
+const GRID_SKIP_SLUGS: &[&str] = &[];
+
+/// Spacing tuned for a ~40 mm catalog square (coarser than the comparison table).
+fn grid_spacing_for(p: &Pattern) -> f64 {
+    let dense = matches!(
+        p.slug,
+        "arena"
+            | "grainy-soil"
+            | "gravelly-soil"
+            | "diabase"
+            | "feldspar"
+            | "dacite"
+            | "ophitic"
+            | "erosion-lines"
+            | "compacted-soil"
+            | "clay-soil"
+            | "layered-soil"
+            | "organic-topsoil"
+            | "loose-soil"
+            | "stipple"
+            | "stipple-noise"
+            | "stipple-edge"
+            | "dots"
+            | "dots-hex"
+            | "hilbert"
+            | "stone-cluster"
+            | "fill"
+            | "pebbled-soil"
+            | "hornblende"
+    );
+    if dense {
+        return COARSE_MM * 1.35;
+    }
+    if p.preview_spacing <= FINE_MM {
+        return COARSE_MM;
+    }
+    if p.preview_spacing <= MID_MM {
+        return COARSE_MM;
+    }
+    p.preview_spacing
+}
+
+fn grid_label(p: &Pattern) -> String {
+    p.name.to_string()
+}
+
+/// Every pattern once, on a square, name underneath — no shape matrix.
+///
+/// The tiles are sorted by name so the sheet reads like an index: you can
+/// find a pattern without scanning the whole page.
+fn render_pattern_grid(patterns: &[Pattern], region: &Region) -> String {
+    let mut patterns: Vec<&Pattern> = patterns
+        .iter()
+        .filter(|p| !GRID_SKIP_SLUGS.contains(&p.slug))
+        .collect();
+    patterns.sort_by_key(|p| grid_label(p).to_lowercase());
+    let cols = GRID_COLS;
+    let rows = (patterns.len() + cols - 1) / cols;
+    let w = GRID_CELL_W * cols as f64;
+    let row_h = GRID_PATTERN_H + GRID_LABEL_H;
+    let h = row_h * rows as f64 + 16.0;
+    let mut svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {w} {h}' width='{w2}' height='{h2}'>\n\
+         <rect width='{w}' height='{h}' fill='{PAPER}'/>\n\
+         <style>text{{font-family:Georgia,serif;fill:{LABEL}}}</style>\n",
+        w2 = w * 1.5,
+        h2 = h * 1.5,
+    );
+    let pt = |p: &(f64, f64)| format!("{:.2},{:.2}", p.0, p.1);
+    let (minx, miny, maxx, maxy) = region.bounds_mm();
+    let fit = ((GRID_CELL_W - 2.0 * GRID_PAD) / (maxx - minx).max(1e-6))
+        .min((GRID_PATTERN_H - 2.0 * GRID_PAD) / (maxy - miny).max(1e-6));
+
+    for (idx, pattern) in patterns.iter().enumerate() {
+        let col = idx % cols;
+        let row = idx / cols;
+        let ox = col as f64 * GRID_CELL_W;
+        let oy = row as f64 * row_h + 8.0;
+        let spacing = grid_spacing_for(pattern);
+        let strokes = (pattern.fill)(
+            region,
+            spacing,
+            pattern.default_angle,
+            border_for(spacing),
+        );
+        let xform = format!(
+            "translate({:.2},{:.2}) scale({fit:.4},{:.4}) translate({:.3},{:.3})",
+            ox + GRID_CELL_W / 2.0,
+            oy + GRID_PATTERN_H / 2.0,
+            -fit,
+            -(minx + maxx) / 2.0,
+            -(miny + maxy) / 2.0,
+        );
+        svg.push_str(&format!(
+            "<g transform='{xform}' fill='none' stroke-linecap='round' stroke-linejoin='round'>\n\
+             <g stroke='{WALL}' stroke-width='{:.4}'>\n",
+            STRIP_WALL / fit
+        ));
+        for ring in region.all_rings_mm() {
+            let d: Vec<String> = ring.iter().map(pt).collect();
+            svg.push_str(&format!("<path d='M{}Z'/>\n", d.join("L")));
+        }
+        svg.push_str(&format!("</g>\n<g stroke='{INK}' stroke-width='{:.4}'>\n", STRIP_INK / fit));
+        for s in &strokes {
+            let d: Vec<String> = s.iter().map(pt).collect();
+            svg.push_str(&format!("<path d='M{}'/>\n", d.join("L")));
+        }
+        svg.push_str("</g>\n</g>\n");
+        let label = grid_label(pattern);
+        svg.push_str(&format!(
+            "<text x='{:.1}' y='{:.1}' font-size='7.5' text-anchor='middle'>{}</text>\n",
+            ox + GRID_CELL_W / 2.0,
+            oy + GRID_PATTERN_H + 14.0,
+            label,
+        ));
+    }
+    svg.push_str("</svg>\n");
+    svg
+}
+
 /// The strips the README is illustrated with, in `docs/img/`.
 fn write_readme_strips(shapes: &[(&'static str, Region)], patterns: &[Pattern]) {
     let dir = "docs/img";
@@ -917,6 +1586,62 @@ fn write_readme_strips(shapes: &[(&'static str, Region)], patterns: &[Pattern]) 
             row(
                 "blob",
                 &[("marble", FINE_MM), ("wood", MID_MM), ("cracks", MID_MM), ("terrazzo", MID_MM), ("chess", MID_MM), ("truchet", MID_MM)],
+            ),
+        ),
+        (
+            "geology",
+            row(
+                "blob",
+                &[
+                    ("granite", COARSE_MM),
+                    ("arena", FINE_MM),
+                    ("breccia", COARSE_MM),
+                    ("coal", COARSE_MM),
+                    ("gneiss", COARSE_MM),
+                    ("ferrous", COARSE_MM),
+                ],
+            ),
+        ),
+        (
+            "geology-2",
+            row(
+                "blob",
+                &[
+                    ("diorite", COARSE_MM),
+                    ("conglomerate", COARSE_MM),
+                    ("masonry", COARSE_MM),
+                    ("diatom", COARSE_MM),
+                    ("amphibolite", COARSE_MM),
+                    ("hornblende", COARSE_MM),
+                ],
+            ),
+        ),
+        (
+            "ground",
+            row(
+                "blob",
+                &[
+                    ("fine-gravel", FINE_MM),
+                    ("coarse-stone", COARSE_MM),
+                    ("pebble-scatter", COARSE_MM),
+                    ("mixed-rocks", COARSE_MM),
+                    ("cracked-earth", COARSE_MM),
+                    ("grainy-soil", FINE_MM),
+                ],
+            ),
+        ),
+        (
+            "ground-2",
+            row(
+                "blob",
+                &[
+                    ("erosion-lines", FINE_MM),
+                    ("stone-cluster", COARSE_MM),
+                    ("gravelly-soil", FINE_MM),
+                    ("mulch", COARSE_MM),
+                    ("clay-soil", FINE_MM),
+                    ("pebbled-soil", COARSE_MM),
+                ],
             ),
         ),
         (
@@ -1056,6 +1781,11 @@ fn main() {
     );
     let table = render_sheet("penfill", &note, &pattern_names, &table_rows);
     std::fs::write(format!("{dir}/gallery.svg"), table).unwrap();
+
+    let square = shapes.iter().find(|(n, _)| *n == "square").map(|(_, r)| r).expect("square");
+    let all = render_pattern_grid(&patterns_sorted(), square);
+    std::fs::write(format!("{dir}/all-patterns.svg"), all).unwrap();
+    println!("wrote {dir}/all-patterns.svg");
 
     let cad = render_sheet(
         "CAD patterns",

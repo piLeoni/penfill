@@ -200,6 +200,11 @@ evenly spread without looking like a grid.
 | `stipple_field(region, dense, sparse, field, mark=None, seed=0)`               | Density from your own function; see [Build your own pattern](#build-your-own-pattern)                                                    |
 | `gravel(region, spacing, seed=0, clipped=False)`                               | Rounded Voronoi stones. Near the wall the stones get smaller to fit into corners; `clipped=True` cuts uniform stones at the wall instead |
 | `grass(region, spacing, angle=0, seed=0)`                                      | Grass tufts as a repeating hatch tile, cut by the wall                                                                                   |
+| `pebbles(region, spacing, seed=0)`                                             | Small rounded stones — circle outlines on a Poisson grid (lighter than gravel)                                                           |
+| `leaves(region, spacing, seed=0)`                                              | Sparse sprout tile — offset rows of blades and V marks (alias: same as `sprouts` in WASM)                                                |
+| `fluid_grass(region, spacing, seed=0)`                                         | Loose curved grass — single blades, V-tufts and fans on a jittered Poisson field                                                         |
+| `lily_pads(region, spacing, seed=0)`                                           | Equal circles with centre dots; overlapping pads merge to one outline                                                                    |
+| `canopy(region, spacing, seed=0)`                                              | Top-down canopies — clustered wobbly lobes with a centre dot per lobe (`spacing` ≈ distance between trees)                               |
 | `scribble(region, spacing, angle=0, seed=0)`                                   | Hand-drawn cross-hatching with wobbly, broken lines                                                                                      |
 | `truchet(region, cell, angle=0, seed=0)`                                       | Random quarter-circle tiles that join into long winding paths                                                                            |
 
@@ -218,6 +223,52 @@ Textures built from noise fields and contour lines.
 | `cracks(region, spacing, seed=0)`            | Parched ground / mud cracks — wobbly net along Voronoi edges                                                                                    |
 | `terrazzo(region, size, hatch=None, seed=0)` | Chips of many sizes that never overlap. About a third are dark, drawn with an open hatch or cross-hatch `hatch` mm apart (default `size / 6`) |
 | `chess(region, cell, spacing=None, angle=0)` | Checkerboard with the dark squares hatched                                                                                                    |
+
+
+## Geology (map symbols)
+
+![granite, arena, breccia, coal, gneiss, ferrous](docs/img/geology.svg)
+
+![diorite, conglomerate, masonry, diatom, amphibolite, hornblende](docs/img/geology-2.svg)
+
+Cartographic lithology hatches built from one small pattern language: a base
+lattice, a mark, and jitter, clipped to the region. The names follow the
+lithologies you find on a geological sheet.
+
+| Igneous | Clastic | Bedded | Organic | Metamorphic / special |
+| ------- | ------- | ------ | ------- | --------------------- |
+| `granite` `+` | `arena` dots | `beds` wavy horizons | `diatom` ring motifs | `gneiss` aligned dashes |
+| `granite2` `×` | `conglomerate` round pebbles | `laminae` fine waves | `diatom2` denser rings | `bentonite` dash columns |
+| `diorite` `T` | `conglomerate2` flat pebbles | `coal` dashed seams | `coquina` shell spirals | `amphibolite` vertical zigzag |
+| `gabbro` `V` | `breccia` angular fragments | `masonry` running-bond brick | | `ferrous` checkerboard |
+| `brackets` `└┘` | `breccia2` blobs | | | `lava` vertical bars |
+| `dacite` crystal dashes | `shards` sparse shards | | | `hornblende` crystal capsules |
+| `feldspar` dense strokes | `drift` tilted pebbles | | | `diabase` dense hatch \| `fill` cross hatch |
+| | `silty_soil` small cells | | | `ophitic` laths + pyroxene grain |
+
+All take `(region, spacing, seed=0)`; `dacite`, `feldspar`, `beds`, `laminae`,
+`coal`, `gneiss`, `bentonite`, `diabase`, `ophitic`, `erosion`, `mulch`,
+`layered_soil`, `clay_soil`, `fill` and `hornblende` also take an `angle` in
+degrees.
+
+### Ground and stone
+
+![fine gravel, coarse stone, pebble scatter, mixed rocks, cracked earth, grainy soil](docs/img/ground.svg)
+
+![erosion lines, stone cluster, gravelly soil, mulch, clay soil, pebbled soil](docs/img/ground-2.svg)
+
+Loose materials and weathered surfaces, for the areas between outcrops.
+
+| | | | |
+| --- | --- | --- | --- |
+| `fine_gravel` dots + rings | `coarse_stone` grained cells | `pebble_scatter` spaced ovals | `mixed_rocks` varied cells |
+| `cracked_earth` cells + grain | `grainy_soil` fine dots | `erosion` parallel waves | `stone_cluster` tight pebbles |
+| `gravelly_soil` short dashes | `mulch` staggered dashes | `mulched_soil` finer rows | `layered_soil` stacked horizons |
+| `topsoil` mixed dots | `pebbled_soil` squares | `loose_soil` open specks | `silty_soil` tight cells |
+| `clay_soil` broad waves | `compacted_soil` thin waves | `sandy_soil` fine grain | `dry_cracked` mud cracks |
+
+These are all `(region, spacing, seed=0)`; `erosion`, `mulch`, `layered_soil`
+and `clay_soil` also take an `angle`.
 
 
 ## CAD hatch patterns

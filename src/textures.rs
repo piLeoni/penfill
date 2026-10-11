@@ -84,93 +84,76 @@ pub fn fill_wood(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: A
     fill_isolines(region, (spacing / 8.0).clamp(0.08, 0.4), &levels_every(-reach, reach, spacing), f)
 }
 
-/// Parched ground / mud cracks: a wobbly net along Voronoi edges after domain
-/// warp. `spacing` is roughly the cell size in mm (map symbol for dry,
-/// cracked earth).
+/// Parched ground / mud cracks: rounded Voronoi cells with wide gaps between
+/// them — a cellular tile like dry desert earth. `spacing` is roughly the
+/// cell size in mm.
 pub fn fill_cracks(region: &Region, spacing: f64, seed: u64) -> Strokes {
     if spacing <= 0.0 || region.is_empty() {
         return vec![];
     }
-    let sites = poisson_disk(&region.outset(spacing * 2.0), spacing * 0.92, seed);
-    let grid = Bins::new(&sites, spacing * 0.85);
-    let noise = Perlin::new(seed.wrapping_add(4));
-    let ripple = Perlin::new(seed.wrapping_add(11));
-    let wobble = spacing * 0.55;
-    let f = |p: Pt| {
-        let s = spacing * 1.35;
-        let u = p.0 / s;
-        let v = p.1 / s;
-        let w1 = noise.fbm(u, v, 3);
-        let w2 = noise.fbm(u * 2.4 + 1.7 * w1, v * 2.4 - 1.1 * w1, 2);
-        let q = (
-            p.0 + wobble * (w1 + 0.45 * w2),
-            p.1 + wobble * (ripple.noise(u + 4.2, v - 2.8) + 0.4 * w2),
-        );
-        let (d1, d2) = grid.two_nearest(q);
-        let edge = d2 - d1;
-        // Thicken and pinch crack lines slightly.
-        edge + spacing * 0.05 * noise.noise(u * 1.6 - 3.0, v * 1.6)
-    };
-    let band = (spacing * 0.07).clamp(0.15, 0.6);
-    fill_isolines(
-        region,
-        (spacing / 18.0).clamp(0.04, 0.22),
-        &[0.0, band],
-        f,
-    )
-}
-
-/// Points binned on a grid for nearest-neighbour lookups.
-struct Bins<'a> {
-    pts: &'a [Pt],
-    cell: f64,
-    origin: Pt,
-    cols: usize,
-    rows: usize,
-    bins: Vec<Vec<usize>>,
-}
-
-impl<'a> Bins<'a> {
-    fn new(pts: &'a [Pt], cell: f64) -> Bins<'a> {
-        let minx = pts.iter().map(|p| p.0).fold(f64::MAX, f64::min);
-        let miny = pts.iter().map(|p| p.1).fold(f64::MAX, f64::min);
-        let maxx = pts.iter().map(|p| p.0).fold(f64::MIN, f64::max);
-        let maxy = pts.iter().map(|p| p.1).fold(f64::MIN, f64::max);
-        let cols = ((maxx - minx) / cell) as usize + 1;
-        let rows = ((maxy - miny) / cell) as usize + 1;
-        let mut bins = vec![Vec::new(); cols * rows];
-        for (i, p) in pts.iter().enumerate() {
-            let c = ((p.0 - minx) / cell) as usize;
-            let r = ((p.1 - miny) / cell) as usize;
-            bins[r * cols + c].push(i);
-        }
-        Bins { pts, cell, origin: (minx, miny), cols, rows, bins }
-    }
-
-    /// Distances to the nearest and second-nearest point.
-    fn two_nearest(&self, p: Pt) -> (f64, f64) {
-        let c = ((p.0 - self.origin.0) / self.cell).floor() as i64;
-        let r = ((p.1 - self.origin.1) / self.cell).floor() as i64;
-        let (mut d1, mut d2) = (f64::MAX, f64::MAX);
-        for rr in r - 2..=r + 2 {
-            for cc in c - 2..=c + 2 {
-                if rr < 0 || cc < 0 || rr as usize >= self.rows || cc as usize >= self.cols {
-                    continue;
-                }
-                for &i in &self.bins[rr as usize * self.cols + cc as usize] {
-                    let q = self.pts[i];
-                    let d = (q.0 - p.0).hypot(q.1 - p.1);
-                    if d < d1 {
-                        d2 = d1;
-                        d1 = d;
-                    } else if d < d2 {
-                        d2 = d;
-                    }
-                }
+    use crate::concentric::signed_area;
+    let field = region.outset(spacing);
+    let centres = poisson_disk(&field, spacing * 0.92, seed);
+    let mut rng = Rng::new(seed.wrapping_add(4));
+    let reach2 = (spacing * 2.5).powi(2);
+    let gap = spacing * rng.range(0.14, 0.20);
+    let corner = spacing * rng.range(0.22, 0.34);
+    let min_area = 0.08 * spacing * spacing;
+    let mut out: Strokes = Vec::new();
+    for (i, &c) in centres.iter().enumerate() {
+        let r = spacing * 2.0;
+        let mut cell = vec![(c.0 - r, c.1 - r), (c.0 + r, c.1 - r), (c.0 + r, c.1 + r), (c.0 - r, c.1 + r)];
+        for (j, &o) in centres.iter().enumerate() {
+            if i == j || (o.0 - c.0).powi(2) + (o.1 - c.1).powi(2) > reach2 {
+                continue;
+            }
+            cell = clip_half_plane(&cell, c, o);
+            if cell.len() < 3 {
+                break;
             }
         }
-        (d1, d2)
+        if cell.len() < 3 {
+            continue;
+        }
+        let cell = Region::from_ring(&cell).intersection(region);
+        let area: f64 = cell.all_rings_mm().iter().map(|r| signed_area(r)).sum();
+        if area < min_area {
+            continue;
+        }
+        let piece = cell.inset(gap + corner).outset(corner);
+        for ring in piece.all_rings_mm() {
+            if ring.len() < 3 || signed_area(&ring).abs() < min_area {
+                continue;
+            }
+            let mut closed = ring;
+            if closed.first() != closed.last() {
+                closed.push(closed[0]);
+            }
+            out.extend(region.clip_polyline(&closed));
+        }
     }
+    out
+}
+
+/// Keep the part of `poly` closer to `c` than to `o`.
+fn clip_half_plane(poly: &[Pt], c: Pt, o: Pt) -> Vec<Pt> {
+    let m = ((c.0 + o.0) / 2.0, (c.1 + o.1) / 2.0);
+    let n = (o.0 - c.0, o.1 - c.1);
+    let side = |p: Pt| (p.0 - m.0) * n.0 + (p.1 - m.1) * n.1;
+    let mut out = Vec::new();
+    for i in 0..poly.len() {
+        let a = poly[i];
+        let b = poly[(i + 1) % poly.len()];
+        let (sa, sb) = (side(a), side(b));
+        if sa <= 0.0 {
+            out.push(a);
+        }
+        if (sa < 0.0 && sb > 0.0) || (sa > 0.0 && sb < 0.0) {
+            let t = sa / (sa - sb);
+            out.push((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

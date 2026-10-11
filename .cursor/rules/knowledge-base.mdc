@@ -1,0 +1,37 @@
+---
+description: Keep docs/architecture in sync; load knowledge selectively, not by default
+alwaysApply: true
+---
+
+# Architecture knowledge base
+
+## Before a substantial task
+
+1. Identify affected subsystem(s) using `docs/architecture/INDEX.md`.
+2. Read only the linked `docs/architecture/<subsystem>.md` files for those areas.
+3. Inspect the specific source files cited there (and call sites) to confirm behaviour.
+
+Prefer this over broad repo searches when the subsystem doc already names the right modules.
+
+## While implementing
+
+- Follow patterns in neighbouring code and in subsystem docs.
+- If you discover durable architectural fact (interface contract, invariant, non-obvious pipeline step), note whether it belongs in an existing subsystem doc or `decisions.md`.
+
+## Before finishing a substantial task
+
+Ask whether the change affects subsystem purpose, entry points, data flow, public contracts, dependencies, invariants, or recorded decisions.
+
+- **Yes** → update the minimal set of `docs/architecture/*.md` and `INDEX.md` if needed. Match existing tone: concise, file/symbol pointers, no pasted large code blocks.
+- **No** → state explicitly that no documentation update was required.
+
+Do not update docs for every typo, test-only change, or preset tweak unless it encodes new architectural knowledge.
+
+## Authority
+
+Source code is authoritative. If documentation conflicts with implementation, fix the documentation after verifying the code.
+
+## Related
+
+Agent entry point and repository map: `AGENTS.md`. Routing table for the
+subsystem docs: `docs/architecture/INDEX.md`.
