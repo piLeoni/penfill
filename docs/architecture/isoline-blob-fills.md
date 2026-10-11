@@ -2,7 +2,7 @@
 
 **Product spec:** draw.land [isoline-blob-fills.md](../../../drawland/docs/architecture/isoline-blob-fills.md). **Reference images:** `drawland/docs/architecture/img/isoline-blob-fills/`.
 
-**Status:** implemented in `src/isoline_blobs.rs`, exported as `fill_isoline_blobs` / `fill_isoline_blobs_with_coverage`.
+**Status:** two fills. `src/isoline_blobs.rs` — flat contours of one 2D field. `src/isoline_stack.rs` — 3D stacked slices with overhang and boundary modes (see "Stacked slices" below).
 
 ## What it is
 
@@ -64,9 +64,34 @@ No `random::poisson_disk` — site placement for the procedural case comes from 
 - `lower_threshold_grows_and_fuses_coverage` — density/connectivity knob behaves monotonically.
 - `two_close_sites_fuse_into_one_loop` / `far_sites_stay_separate` — the fuse-vs-stamp behaviour, asserted directly on `coverage.all_rings_mm().len()`.
 
+## Stacked slices (`src/isoline_stack.rs`)
+
+The flat field above can only nest: every level sits inside the one below, so nothing ever overhangs. Vegetation needs upper layers that are **wider** than what is under them and hide it. `isoline_stack` gets that from a 3D model:
+
+- Each crown is a dome of spheres (Wyvill metaballs, `(1 - d²/r²)³`, so touching spheres melt into one lumpy surface): higher and larger toward the middle. `bubble` sets sphere size (lumpiness), `crown` the crown size.
+- The volume is cut into `slices` horizontal planes. Each slice's outline is one `fill_isolines` call at `ISO` over a frame around all spheres; per slice only the spheres it cuts are bucketed in a hash grid.
+- Painter's order, top slice first: a slice's outline is clipped to *outside* the union of the slices above it (`frame.difference(&above)`), then the slice joins `above` (`Region::from_rings_even_odd`, `Region::union`). A crown standing higher than its neighbour hides that neighbour's rings where it overhangs.
+- Jitter: the sample is domain-warped and the field multiplied by `1 + jitter·noise`, both noises shifted with `z` so the wobble changes from slice to slice.
+
+`EdgeMode`:
+
+| Mode | Placement | Guarantee |
+| --- | --- | --- |
+| `Clip` | crowns over the region grown by one crown | strokes cut at the boundary |
+| `Inside` | crowns in the region; spheres shrunk to fit | field faded to zero **at** the boundary: every outline closes inside, none is cut |
+| `Overflow(m)` | plus a row of crowns standing on every boundary ring | field faded to zero `m` mm **outside**: outlines close within `m` past the border |
+
+The fade (`Fade`) is a coarse grid of signed boundary distances, interpolated and smoothstepped over `bubble · 0.6`; it is evaluated at the *unwarped* sample, so the wobble cannot carry ink past the limit. Spheres are also shrunk toward the limit first (`fit_to_limit`), so the edge stays lumpy instead of being pressed flat.
+
+`coverage` (0–1) thins generated crowns with low-frequency noise into woods and clearings; `CrownSource::Crowns` takes known crowns (position, radius, height) instead. The returned `coverage` region is the union of every slice — the canopy's footprint, for masks.
+
+Tests: `draws_inside_the_region`, `inside_mode_never_touches_the_boundary`, `overflow_mode_crosses_the_boundary_but_not_far`, `a_higher_wider_bubble_hides_the_rings_under_it`.
+
+Cost: `slices` × (frame area / cell²) field samples; ~4 s for a 120 mm park in release.
+
 ## Preview
 
-`examples/isoline_blobs_demo.rs` (`cargo run --example isoline_blobs_demo`) writes scattered/dense/sites SVGs to `examples/gallery/`; `isoline-blobs-scattered.svg` is the one copied into draw.land's docs as `example-generated.png`.
+`examples/isoline_blobs_demo.rs` (`cargo run --release --example isoline_blobs_demo`) writes `isoline-blobs-scattered.svg` and `isoline-stack-{clip,inside,overflow,dense}.svg` (an irregular park with a pond hole) to `examples/gallery/`. Copies live in draw.land's docs.
 
 ## Open follow-ups
 

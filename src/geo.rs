@@ -138,6 +138,16 @@ impl Region {
         Region::from_shapes(region.overlay(&holes, OverlayRule::Difference, FillRule::NonZero))
     }
 
+    /// Build from rings filled even-odd: a ring inside another is a hole, a
+    /// ring inside that an island again — what the contours of a field bound.
+    pub fn from_rings_even_odd(rings: &[Vec<Pt>]) -> Region {
+        let contours: Vec<Vec<P>> = rings.iter().filter(|r| r.len() >= 3).map(|r| to_p(r)).collect();
+        if contours.is_empty() {
+            return Region::default();
+        }
+        Region::from_shapes(contours.simplify_shape(FillRule::EvenOdd))
+    }
+
     /// Build from a single outer ring (mm). Test/fixture convenience.
     pub fn from_ring(ring: &[Pt]) -> Region {
         Region::from_polygons(&[vec![ring.to_vec()]])
@@ -207,6 +217,17 @@ impl Region {
             .start_cap(LineCap::Round(ARC_STEP))
             .end_cap(LineCap::Round(ARC_STEP));
         Region::from_shapes(open.stroke(style, false))
+    }
+
+    /// Everything in `self` or `other`.
+    pub fn union(&self, other: &Region) -> Region {
+        if other.is_empty() {
+            return self.clone();
+        }
+        if self.is_empty() {
+            return other.clone();
+        }
+        Region::from_shapes(self.shapes.overlay(&other.shapes, OverlayRule::Union, FillRule::NonZero))
     }
 
     /// `self` minus `other`.

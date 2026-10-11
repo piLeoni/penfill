@@ -1,94 +1,67 @@
-//! Quick preview: `cargo run --example isoline_blobs_demo`
-//! Writes `examples/gallery/isoline-blobs-*.svg` (120x120 mm square each).
+//! Quick preview: `cargo run --release --example isoline_blobs_demo`
+//! Writes `examples/gallery/isoline-*.svg`.
 
-use penfill::geo::Region;
-use penfill::isoline_blobs::{default_params, fill_isoline_blobs_with_coverage, IsolineFieldParams};
-use penfill::{FieldSite, FieldSource};
+use penfill::geo::{Pt, Region};
+use penfill::isoline_blobs::{default_params, fill_isoline_blobs_with_coverage};
+use penfill::isoline_stack::{fill_isoline_stack_with_coverage, EdgeMode, IsolineStackParams};
 
 fn main() {
-    let region = Region::from_ring(&[(0.0, 0.0), (120.0, 0.0), (120.0, 120.0), (0.0, 120.0)]);
+    let square = Region::from_ring(&[(0.0, 0.0), (120.0, 0.0), (120.0, 120.0), (0.0, 120.0)]);
+    let flat = fill_isoline_blobs_with_coverage(&square, &default_params(16.0, 0.7, 42));
+    write("examples/gallery/isoline-blobs-scattered.svg", &square, &flat.strokes);
 
-    // Scattered, clearly separated clusters of varying size — the defaults.
-    let scattered = default_params(16.0, 0.7, 42);
-    write_preview(&region, &scattered, "examples/gallery/isoline-blobs-scattered.svg");
-
-    // Denser: lower threshold fuses neighbours into connected masses.
-    let dense = IsolineFieldParams {
-        seed: 42,
-        source: FieldSource::Noise,
-        feature_size: 16.0,
-        contour_spacing: 0.9,
-        warp: 0.45,
-        threshold: -0.1,
-    };
-    write_preview(&region, &dense, "examples/gallery/isoline-blobs-dense.svg");
-
-    // Explicit sites (e.g. real tree positions) instead of procedural noise.
-    let sites = IsolineFieldParams {
-        seed: 1,
-        source: FieldSource::Sites(vec![
-            FieldSite { at: (20.0, 20.0), weight: 1.0, radius: 7.0 },
-            FieldSite { at: (33.0, 24.0), weight: 1.0, radius: 7.0 },
-            FieldSite { at: (70.0, 80.0), weight: 1.0, radius: 9.0 },
-            FieldSite { at: (85.0, 70.0), weight: 1.0, radius: 7.0 },
-            FieldSite { at: (95.0, 95.0), weight: 0.8, radius: 5.0 },
-        ]),
-        feature_size: 16.0,
-        contour_spacing: 0.7,
-        warp: 0.25,
-        threshold: 0.2,
-    };
-    write_preview(&region, &sites, "examples/gallery/isoline-blobs-sites.svg");
-}
-
-fn write_preview(region: &Region, params: &IsolineFieldParams, path: &str) {
-    let out = fill_isoline_blobs_with_coverage(region, params);
-    let svg = render(region, &out.strokes, 120.0, 120.0);
-    std::fs::write(path, svg).expect("write svg");
-    eprintln!(
-        "wrote {path} ({} strokes, coverage loops {})",
-        out.strokes.len(),
-        out.coverage.all_rings_mm().len()
-    );
-}
-
-fn render(region: &Region, strokes: &penfill::Strokes, w: f64, h: f64) -> String {
-    let pad = 6.0;
-    let vw = w + 2.0 * pad;
-    let vh = h + 2.0 * pad;
-    let mut s = format!(
-        "<svg xmlns='http://www.w3.org/2000/svg' width='{w}mm' height='{h}mm' viewBox='{x0} {y0} {vw} {vh}'>\n",
-        x0 = -pad,
-        y0 = -pad,
-    );
-    s.push_str("<rect x='0' y='0' width='100%' height='100%' fill='#f4f0e6' transform='translate(-6,-6)' />\n");
-    s.push_str("<g fill='none' stroke='#999' stroke-width='0.15'>\n");
-    for ring in region.all_rings_mm() {
-        if ring.len() < 2 {
-            continue;
-        }
-        s.push_str(&format!("<path d='{}'/>\n", path_d(&ring, true)));
+    let park = park();
+    for (name, edge) in [("clip", EdgeMode::Clip), ("inside", EdgeMode::Inside), ("overflow", EdgeMode::Overflow(2.5))] {
+        let p = IsolineStackParams { seed: 42, edge, ..Default::default() };
+        let out = fill_isoline_stack_with_coverage(&park, &p);
+        write(&format!("examples/gallery/isoline-stack-{name}.svg"), &park, &out.strokes);
     }
-    s.push_str("</g>\n");
-    s.push_str("<g fill='none' stroke='#111' stroke-width='0.12' stroke-linecap='round' stroke-linejoin='round'>\n");
-    for pts in strokes {
-        if pts.len() < 2 {
-            continue;
-        }
-        let closed = pts.first() == pts.last();
-        s.push_str(&format!("<path d='{}'/>\n", path_d(pts, closed)));
+    let dense = IsolineStackParams { seed: 42, coverage: 1.0, edge: EdgeMode::Inside, ..Default::default() };
+    let out = fill_isoline_stack_with_coverage(&park, &dense);
+    write("examples/gallery/isoline-stack-dense.svg", &park, &out.strokes);
+}
+
+/// An irregular park outline with a pond-shaped hole, ~120 mm across.
+fn park() -> Region {
+    let blob = |cx: f64, cy: f64, r: f64, wob: f64, n: usize| -> Vec<Pt> {
+        (0..n)
+            .map(|k| {
+                let t = std::f64::consts::TAU * k as f64 / n as f64;
+                let rr = r * (1.0 + wob * ((3.0 * t).sin() * 0.6 + (5.0 * t + 1.0).cos() * 0.4));
+                (cx + rr * t.cos(), cy + rr * t.sin())
+            })
+            .collect()
+    };
+    Region::from_polygons(&[vec![blob(60.0, 60.0, 52.0, 0.18, 90), blob(72.0, 52.0, 11.0, 0.15, 40)]])
+}
+
+fn write(path: &str, region: &Region, strokes: &penfill::Strokes) {
+    let (x0, y0, x1, y1) = region.bounds_mm();
+    let pad = 8.0;
+    let (w, h) = (x1 - x0 + 2.0 * pad, y1 - y0 + 2.0 * pad);
+    let mut s = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{w}mm' height='{h}mm' viewBox='{} {} {w} {h}'>\n",
+        x0 - pad,
+        y0 - pad
+    );
+    s.push_str(&format!("<rect x='{}' y='{}' width='{w}' height='{h}' fill='#f4f0e6'/>\n", x0 - pad, y0 - pad));
+    s.push_str("<g fill='none' stroke='#c33' stroke-width='0.15' stroke-dasharray='1 1'>\n");
+    for ring in region.all_rings_mm() {
+        s.push_str(&format!("<path d='{} Z'/>\n", d(&ring)));
+    }
+    s.push_str("</g>\n<g fill='none' stroke='#111' stroke-width='0.14' stroke-linecap='round' stroke-linejoin='round'>\n");
+    for pts in strokes.iter().filter(|p| p.len() >= 2) {
+        s.push_str(&format!("<path d='{}'/>\n", d(pts)));
     }
     s.push_str("</g>\n</svg>\n");
-    s
+    std::fs::write(path, s).expect("write svg");
+    eprintln!("wrote {path} ({} strokes)", strokes.len());
 }
 
-fn path_d(pts: &[(f64, f64)], close: bool) -> String {
-    let mut d = format!("M {:.3},{:.3}", pts[0].0, pts[0].1);
+fn d(pts: &[Pt]) -> String {
+    let mut out = format!("M {:.3},{:.3}", pts[0].0, pts[0].1);
     for p in &pts[1..] {
-        d.push_str(&format!(" L {:.3},{:.3}", p.0, p.1));
+        out.push_str(&format!(" L {:.3},{:.3}", p.0, p.1));
     }
-    if close {
-        d.push_str(" Z");
-    }
-    d
+    out
 }

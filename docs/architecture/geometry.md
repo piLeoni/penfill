@@ -33,8 +33,10 @@ point-in-region testing.
 - Construction: `from_polygons`, `from_ring`.
 - Queries: `is_empty`, `bounds_mm`, `all_rings_mm`, `parts`, `covers_point`,
   `segment_inside`, `segment_inside_relaxed`, `dist_to_boundary`.
-- Boolean / offset: `inset` (mitred), `outset` (round), `difference`,
+- Boolean / offset: `inset` (mitred), `outset` (round), `union`, `difference`,
   `intersection`, `around_strokes`.
+- `from_rings_even_odd`: rings filled even-odd (nested rings alternate
+  inside/outside) — for regions bounded by a field's contour lines.
 - Clipping: `clip_segment`, `clip_polyline`, `clip_strokes`.
 - Routing: `boundary_route` (walk region contours from `a` to `b`) — the
   connector that lets a serpentine survive on non-rectangular outlines.

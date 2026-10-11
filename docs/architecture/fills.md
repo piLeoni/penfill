@@ -65,7 +65,8 @@ Poisson-disk / Voronoi based. Take no anchor.
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage` | nested contours per scattered site; returns mask `coverage` — see [isoline-blob-fills.md](isoline-blob-fills.md) |
+| `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage` | flat: contours of one 2D noise field; returns mask `coverage` — see [isoline-blob-fills.md](isoline-blob-fills.md) |
+| `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage` | 3D: crowns of metaball spheres cut into slices, upper slices hide lower ones (overhang); `EdgeMode::{Clip, Inside, Overflow(mm)}` |
 
 ## Texture (built on `field.rs`)
 

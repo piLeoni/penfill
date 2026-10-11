@@ -8,7 +8,7 @@ source files. Source code is authoritative.
 | --- | --- | --- |
 | Geometry kernel | [geometry.md](geometry.md) | `src/geo.rs`, `src/sweep.rs`, `src/grid.rs` |
 | Fills | [fills.md](fills.md) | `src/zigzag.rs`, `src/spiral.rs`, `src/concentric.rs`, `src/rectilinear.rs`, `src/tile.rs`, `src/litho.rs`, `src/nature.rs`, `src/textures.rs`, and the remaining `src/*.rs` fill modules |
-| Isoline blob fills | [isoline-blob-fills.md](isoline-blob-fills.md) | `src/isoline_blobs.rs`, `src/field.rs`, `src/noise.rs` |
+| Isoline blob fills | [isoline-blob-fills.md](isoline-blob-fills.md) | `src/isoline_blobs.rs`, `src/isoline_stack.rs`, `src/field.rs`, `src/noise.rs` |
 | Placement | [placement.md](placement.md) | `src/anchor.rs`, `src/placement.rs` |
 | Primitives | [primitives.md](primitives.md) | `src/random.rs`, `src/noise.rs`, `src/field.rs` |
 | Extensibility | [extensibility.md](extensibility.md) | `src/pattern.rs`, `src/tile.rs`, `src/pat.rs`, `src/svg.rs` |

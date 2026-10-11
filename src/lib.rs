@@ -17,6 +17,7 @@ pub mod geo;
 pub mod grass;
 pub mod hilbert;
 pub mod isoline_blobs;
+pub mod isoline_stack;
 pub mod gravel;
 pub mod grid;
 pub mod honeycomb;
