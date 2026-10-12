@@ -23,7 +23,7 @@ fn main() {
     let lit = IsolineStackParams {
         seed: 42,
         edge: EdgeMode::Inside,
-        light: Some(Light { from_deg: -45.0, strength: 0.85 }),
+        light: Some(Light { from_deg: -45.0, strength: 0.85, ..Light::default() }),
         ..Default::default()
     };
     let out = fill_isoline_stack_with_coverage(&park, &lit);

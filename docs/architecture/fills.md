@@ -67,24 +67,29 @@ Poisson-disk / Voronoi based. Take no anchor.
 | --- | --- | --- |
 | `growth.rs` | `fill_growth` | dendritic networks grown toward a Poisson-disk field of attractors (Runions et al. 2007); river deltas, veins, cracks, roots, lichen |
 
-Each step, every surviving attractor pulls its nearest branch tip (any node,
-not just current leaves — a thicker trunk can still attract) within `reach`;
-pulled tips advance one `step` along the attractors' averaged direction, and
-an attractor is consumed once a tip lands within `kill` of it. Two tips
-pulled toward different attractor clusters is how a branch forks — no
-explicit branching rule. `RootSource::{Generate(n), At(pts)}` picks where
-networks start.
+Each step, every surviving attractor pulls its nearest node (any node, not
+just leaves) within `reach`; pulled nodes advance one `step` along the
+averaged pull, and an attractor is consumed once a node lands within `kill`
+of it. Forks come from one node being pulled two ways over successive steps;
+`MAX_KIDS` (3) caps the branches leaving a node, so a root forks into trunks
+instead of fanning out into a starburst. `RootSource::{Generate(n), Every(d),
+At(pts)}` picks where networks start; `Every` puts at least one root in every
+part of the region. Twigs end up about 2–2.5× `spacing` apart (draw.land
+maps its `spacing` to that twig gap).
 
-A rare geometric fixed point — an attractor orbiting just outside `kill` of a
-tip forever, pulled every step but never landing close enough — is cut short
-by a stall counter: `fill_growth` breaks once the live-attractor count hasn't
-dropped in `STALL_LIMIT` (64) steps, rather than spinning for the rest of
-`max_steps`. Found via a 20-minute hang in testing at default params (656
-attractors, 2 of them stuck); the fix turned that into a 20 ms run. Keep this
-in mind if `growth`'s tests ever get slow again — it is very likely the same
-kind of stall, not raw cost (`fill_growth` is otherwise O(steps × live
-attractors) using grid-bucketed nearest/within queries, both capped to `≤
-reach`-sized neighbourhoods).
+Each attractor caches its nearest node (`Tree::best`); a new node only
+updates the attractors in its grid neighbourhood, so a step costs O(live
+attractors). Termination: a node pulled to a zero net direction, or whose
+next point lands within `0.3·step` of an existing node, is *stuck*, and the
+attractors holding it are dropped. This replaced a stall counter: without it
+an attractor could orbit just outside `kill` forever.
+
+Output: `branches` splits the tree into polylines (each follows its child
+with the most leaves; other children start at the junction), drops side
+spurs of ≤3 nodes, and Chaikin-smooths them (`smooth` rounds). With `pen > 0`
+a branch carrying `thicken·k²` leaves gets `k` (≤ `max_passes`) parallel
+passes a side, `pen` apart, tapering into the centre line, so trunks read
+dark and twigs hairline.
 
 Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jittery}.svg`.
 

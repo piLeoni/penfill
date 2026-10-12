@@ -6,16 +6,16 @@ use penfill::growth::{fill_growth, GrowthParams, RootSource};
 
 fn main() {
     let disc = disc(60.0, 60.0, 55.0);
-
-    let p = GrowthParams { seed: 5, roots: RootSource::Generate(5), ..Default::default() };
-    let out = fill_growth(&disc, &p);
+    let t = std::time::Instant::now();
+    let out = fill_growth(&disc, &GrowthParams { seed: 5, ..Default::default() });
+    eprintln!("growth-branching: {:?}", t.elapsed());
     write("examples/gallery/growth-branching.svg", &disc, &out);
 
-    let fine = GrowthParams { seed: 5, roots: RootSource::Generate(5), spacing: 1.8, step: 0.9, reach: 4.5, kill: 0.6, ..Default::default() };
+    let fine = GrowthParams { seed: 5, spacing: 0.6, step: 0.25, reach: 5.0, kill: 0.6, pen: 0.12, roots: RootSource::Every(25.0), ..Default::default() };
     let out = fill_growth(&disc, &fine);
     write("examples/gallery/growth-fine.svg", &disc, &out);
 
-    let jittery = GrowthParams { seed: 5, roots: RootSource::Generate(5), jitter: 0.6, ..Default::default() };
+    let jittery = GrowthParams { seed: 5, jitter: 0.5, ..Default::default() };
     let out = fill_growth(&disc, &jittery);
     write("examples/gallery/growth-jittery.svg", &disc, &out);
 }
@@ -40,12 +40,8 @@ fn write(path: &str, region: &Region, strokes: &penfill::Strokes) {
         x0 - pad,
         y0 - pad
     );
-    s.push_str(&format!("<rect x='{}' y='{}' width='{w}' height='{h}' fill='#f4f0e6'/>\n", x0 - pad, y0 - pad));
-    s.push_str("<g fill='none' stroke='#c33' stroke-width='0.15' stroke-dasharray='1 1'>\n");
-    for ring in region.all_rings_mm() {
-        s.push_str(&format!("<path d='{} Z'/>\n", d(&ring)));
-    }
-    s.push_str("</g>\n<g fill='none' stroke='#111' stroke-width='0.14' stroke-linecap='round' stroke-linejoin='round'>\n");
+    s.push_str(&format!("<rect x='{}' y='{}' width='{w}' height='{h}' fill='#ffffff'/>\n", x0 - pad, y0 - pad));
+    s.push_str("<g fill='none' stroke='#111' stroke-width='0.15' stroke-linecap='round' stroke-linejoin='round'>\n");
     for pts in strokes.iter().filter(|p| p.len() >= 2) {
         s.push_str(&format!("<path d='{}'/>\n", d(pts)));
     }

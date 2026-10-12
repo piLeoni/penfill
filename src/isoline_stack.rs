@@ -50,13 +50,27 @@ pub struct Crown {
 /// from it, so the far side of each bump stands taller and wider — more
 /// overhang, more nested rings — while the near side stays low and tight.
 /// Reads as shading without touching ink colour or width.
+///
+/// With `hatch > 0` the stack is also shaded like an engraving: the top
+/// surface is lit from `from_deg` at `elevation_deg` (cast shadows
+/// included) and its dark parts hatched, more lines the darker, crossed in
+/// the deepest shadow; outlines break where the light hits them full on.
 #[derive(Clone, Copy, Debug)]
 pub struct Light {
     /// Degrees, 0 = +x, 90 = +y: the direction the light comes *from*.
     pub from_deg: f64,
-    /// 0 – 1: how much a bubble's radius and height shift between the lit
-    /// and shadow side.
+    /// 0 – 1: how strong the shading is.
     pub strength: f64,
+    /// Degrees above the horizon; lower is longer shadows.
+    pub elevation_deg: f64,
+    /// mm between shading hatch lines; 0 draws no hatching.
+    pub hatch: f64,
+}
+
+impl Default for Light {
+    fn default() -> Self {
+        Light { from_deg: 135.0, strength: 0.8, elevation_deg: 35.0, hatch: 0.4 }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -157,6 +171,7 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     let z_hi = balls.iter().map(|b| b.z + b.r).fold(f64::MIN, f64::max);
     let dz = (z_hi - z_lo) / p.slices as f64;
 
+    let mut shade = p.light.filter(|l| l.hatch > 0.0 && l.strength > 0.0).map(|_| Surface::new(&frame, bubble));
     let mut strokes: Strokes = Vec::new();
     let mut above = Region::default();
     for k in (0..p.slices).rev() {
@@ -187,7 +202,14 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
             }
             h * (1.0 + p.jitter * 0.8 * jitter_noise.fbm(x / wobble + z * 0.43, y / wobble - z * 0.37, 2))
         };
-        let loops = crate::field::fill_isolines(&frame, cell, &[ISO], f);
+        let loops = crate::field::fill_isolines(&frame, cell, &[ISO], &f);
+        if let Some(s) = &mut shade {
+            let reach = cut.iter().map(|d| d.2.sqrt()).fold(0.0, f64::max) + warp;
+            let (x0, y0, x1, y1) = cut.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |b, d| {
+                (b.0.min(d.0), b.1.min(d.1), b.2.max(d.0), b.3.max(d.1))
+            });
+            s.mark(z, (x0 - reach, y0 - reach, x1 + reach, y1 + reach), &f);
+        }
         let slice = Region::from_rings_even_odd(&loops);
         if above.is_empty() {
             strokes.extend(loops);
@@ -203,7 +225,215 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     };
     // Bottom slice first reads as drawing the ground up.
     strokes.reverse();
+    if let (Some(mut s), Some(l)) = (shade, p.light) {
+        s.light(z_lo - dz, l, bubble);
+        strokes = s.break_highlights(&strokes, l.strength);
+        strokes.extend(s.hatching(&keep, l));
+    }
     FillWithCoverage { strokes: keep.clip_strokes(&strokes), coverage: above.intersection(&keep) }
+}
+
+/// The stack's top surface on a grid, lit: what the shading hatch follows.
+struct Surface {
+    x0: f64,
+    y0: f64,
+    step: f64,
+    nx: usize,
+    ny: usize,
+    /// Height of the topmost slice over each cell; NaN where none is.
+    h: Vec<f64>,
+    /// 0 (lit) – 1 (black) once lit.
+    dark: Vec<f64>,
+    /// Light on the surface relative to a flat top: above 1 faces the sun.
+    glare: Vec<f64>,
+}
+
+impl Surface {
+    fn new(frame: &Region, bubble: f64) -> Surface {
+        let (x0, y0, x1, y1) = frame.bounds_mm();
+        let step = (bubble * 0.2).clamp(0.12, 0.5);
+        let nx = ((x1 - x0) / step).ceil() as usize + 1;
+        let ny = ((y1 - y0) / step).ceil() as usize + 1;
+        Surface { x0, y0, step, nx, ny, h: vec![f64::NAN; nx * ny], dark: Vec::new(), glare: Vec::new() }
+    }
+
+    fn at(&self, i: usize, j: usize) -> Pt {
+        (self.x0 + i as f64 * self.step, self.y0 + j as f64 * self.step)
+    }
+
+    /// Slices come top first: a cell the slice at `z` covers, and no slice
+    /// above did, stands at `z`.
+    fn mark(&mut self, z: f64, (x0, y0, x1, y1): (f64, f64, f64, f64), f: impl Fn(Pt) -> f64) {
+        let lo = |v: f64, o: f64, n: usize| (((v - o) / self.step).floor().max(0.0) as usize).min(n - 1);
+        let (i0, i1) = (lo(x0, self.x0, self.nx), lo(x1, self.x0, self.nx) + 1);
+        let (j0, j1) = (lo(y0, self.y0, self.ny), lo(y1, self.y0, self.ny) + 1);
+        for j in j0..j1.min(self.ny) {
+            for i in i0..i1.min(self.nx) {
+                let k = j * self.nx + i;
+                if self.h[k].is_nan() && f(self.at(i, j)) >= ISO {
+                    self.h[k] = z;
+                }
+            }
+        }
+    }
+
+    /// Smooth the terraces into a surface, then light it: Lambert against a
+    /// sun at `elevation_deg`, and cast shadows marched towards the sun.
+    fn light(&mut self, ground: f64, l: Light, bubble: f64) {
+        for v in &mut self.h {
+            if v.is_nan() {
+                *v = ground;
+            }
+        }
+        let r = ((bubble * 0.35) / self.step).ceil().max(1.0) as usize;
+        for _ in 0..2 {
+            self.h = blur(&self.h, self.nx, self.ny, r, true);
+            self.h = blur(&self.h, self.nx, self.ny, r, false);
+        }
+        let (az, el) = (l.from_deg.to_radians(), l.elevation_deg.clamp(5.0, 85.0).to_radians());
+        let (lx, ly) = (az.cos(), az.sin());
+        let (lh, lz, rise) = (el.cos(), el.sin(), el.tan());
+        let strength = l.strength.clamp(0.0, 1.0);
+        let top = self.h.iter().copied().fold(f64::MIN, f64::max);
+        let reach = bubble * 3.0;
+        let (nx, ny) = (self.nx, self.ny);
+        let mut dark = vec![0.0; nx * ny];
+        let mut glare = vec![1.0; nx * ny];
+        for j in 1..ny - 1 {
+            for i in 1..nx - 1 {
+                let k = j * nx + i;
+                let hx = (self.h[k + 1] - self.h[k - 1]) / (2.0 * self.step);
+                let hy = (self.h[k + nx] - self.h[k - nx]) / (2.0 * self.step);
+                let norm = (hx * hx + hy * hy + 1.0).sqrt();
+                let lit = ((-hx * lx * lh - hy * ly * lh + lz) / norm).max(0.0);
+                let rel = lit / lz;
+                let mut d = (1.0 - rel).clamp(0.0, 1.0);
+                // March towards the sun until the ray clears the tallest crown;
+                // shadows stay short and half-tone so gaps don't go black.
+                let mut t = self.step;
+                while self.h[k] + t * rise < top && t < reach {
+                    let (u, v) = (i as f64 + t * lx / self.step, j as f64 + t * ly / self.step);
+                    if u < 0.0 || v < 0.0 || u >= (nx - 1) as f64 || v >= (ny - 1) as f64 {
+                        break;
+                    }
+                    if self.sample(&self.h, u, v) > self.h[k] + t * rise + self.step * 0.5 {
+                        d = d.max(0.5 * (1.0 - t / reach) + 0.25);
+                        break;
+                    }
+                    t += self.step;
+                }
+                dark[k] = d * strength;
+                glare[k] = rel;
+            }
+        }
+        self.dark = dark;
+        self.glare = glare;
+    }
+
+    fn sample(&self, grid: &[f64], u: f64, v: f64) -> f64 {
+        let (i, j) = ((u.floor() as usize).min(self.nx - 2), (v.floor() as usize).min(self.ny - 2));
+        let (fu, fv) = (u - i as f64, v - j as f64);
+        let g = |a: usize, b: usize| grid[b * self.nx + a];
+        (g(i, j) * (1.0 - fu) + g(i + 1, j) * fu) * (1.0 - fv) + (g(i, j + 1) * (1.0 - fu) + g(i + 1, j + 1) * fu) * fv
+    }
+
+    fn lookup(&self, grid: &[f64], p: Pt) -> f64 {
+        let u = ((p.0 - self.x0) / self.step).clamp(0.0, (self.nx - 1) as f64);
+        let v = ((p.1 - self.y0) / self.step).clamp(0.0, (self.ny - 1) as f64);
+        self.sample(grid, u, v)
+    }
+
+    /// Outlines broken where the sun hits the surface full on.
+    fn break_highlights(&self, strokes: &Strokes, strength: f64) -> Strokes {
+        let limit = 1.5 - 0.3 * strength.clamp(0.0, 1.0);
+        let mut out = Vec::new();
+        for s in strokes {
+            let mut run: Vec<Pt> = Vec::new();
+            for &q in s {
+                if self.lookup(&self.glare, q) > limit {
+                    if run.len() >= 2 {
+                        out.push(std::mem::take(&mut run));
+                    }
+                    run.clear();
+                } else {
+                    run.push(q);
+                }
+            }
+            if run.len() >= 2 {
+                out.push(run);
+            }
+        }
+        out
+    }
+
+    /// Hatch lines where the surface is dark: each line of the family has
+    /// its own threshold (ordered dither), so the darker the shade the more
+    /// lines reach into it; a crossing family joins in the deepest shadow.
+    fn hatching(&self, area: &Region, l: Light) -> Strokes {
+        const ORDER: [f64; 4] = [0.0, 0.5, 0.25, 0.75];
+        let angle = l.from_deg - 45.0;
+        let mut out = Vec::new();
+        for (family, base, span) in [(angle, 0.2, 0.45), (angle + 90.0, 0.62, 0.3)] {
+            let (s, c) = family.to_radians().sin_cos();
+            for line in crate::sweep::sweep_lines_through(area, l.hatch, family, (0.0, 0.0)) {
+                let (a, b) = (line[0], line[line.len() - 1]);
+                let row = ((-(a.0 + b.0) * 0.5 * s + (a.1 + b.1) * 0.5 * c) / l.hatch).round() as i64;
+                let threshold = base + span * ORDER[row.rem_euclid(4) as usize];
+                let len = (b.0 - a.0).hypot(b.1 - a.1);
+                let n = (len / (self.step * 0.5)).ceil().max(1.0) as usize;
+                let mut run: Vec<Pt> = Vec::new();
+                for k in 0..=n {
+                    let t = k as f64 / n as f64;
+                    let q = (a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1));
+                    if self.lookup(&self.dark, q) > threshold {
+                        run.push(q);
+                    } else {
+                        flush(&mut run, &mut out, self.step * 2.0);
+                    }
+                }
+                flush(&mut run, &mut out, self.step * 2.0);
+            }
+        }
+        out
+    }
+}
+
+/// Keep a hatch run as a two-point stroke if it is long enough to read.
+fn flush(run: &mut Vec<Pt>, out: &mut Strokes, min: f64) {
+    if run.len() >= 2 {
+        let (a, b) = (run[0], run[run.len() - 1]);
+        if (b.0 - a.0).hypot(b.1 - a.1) >= min {
+            out.push(vec![a, b]);
+        }
+    }
+    run.clear();
+}
+
+/// One box-blur pass of radius `r` cells along x (`along_x`) or y.
+fn blur(src: &[f64], nx: usize, ny: usize, r: usize, along_x: bool) -> Vec<f64> {
+    let mut out = vec![0.0; src.len()];
+    let (len, lines) = if along_x { (nx, ny) } else { (ny, nx) };
+    let idx = |line: usize, k: usize| if along_x { line * nx + k } else { k * nx + line };
+    for line in 0..lines {
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for k in 0..=r.min(len - 1) {
+            sum += src[idx(line, k)];
+            count += 1;
+        }
+        for k in 0..len {
+            out[idx(line, k)] = sum / count as f64;
+            if k + r + 1 < len {
+                sum += src[idx(line, k + r + 1)];
+                count += 1;
+            }
+            if k >= r {
+                sum -= src[idx(line, k - r)];
+                count -= 1;
+            }
+        }
+    }
+    out
 }
 
 /// Crown sites scattered over the region, thinned into patches by low
@@ -463,7 +693,7 @@ mod tests {
         let crowns = vec![Crown { at: (30.0, 30.0), radius: 8.0, height: 6.0 }];
         let lit = IsolineStackParams {
             crowns: CrownSource::Crowns(crowns),
-            light: Some(Light { from_deg: 0.0, strength: 0.9 }),
+            light: Some(Light { from_deg: 0.0, strength: 0.9, hatch: 0.0, ..Light::default() }),
             jitter: 0.0,
             ..params(EdgeMode::Clip)
         };
@@ -479,6 +709,23 @@ mod tests {
         let shadow = ink_past(0.0, 24.0);
         let sunlit = ink_past(36.0, 60.0);
         assert!(shadow > sunlit * 1.3, "shadow {shadow:.1} should clearly outweigh the lit side {sunlit:.1}");
+    }
+
+    #[test]
+    fn shading_hatches_the_side_away_from_the_light() {
+        // Light from +x: the hatch belongs on the crown's -x flank.
+        let crowns = vec![Crown { at: (30.0, 30.0), radius: 10.0, height: 8.0 }];
+        let base = IsolineStackParams { crowns: CrownSource::Crowns(crowns), jitter: 0.0, ..params(EdgeMode::Clip) };
+        let plain = fill_isoline_stack_with_coverage(&square(), &base).strokes;
+        let lit = IsolineStackParams { light: Some(Light { from_deg: 0.0, ..Light::default() }), ..base };
+        let shaded = fill_isoline_stack_with_coverage(&square(), &lit).strokes;
+        let hatch: Vec<&Vec<Pt>> = shaded.iter().filter(|s| s.len() == 2).collect();
+        assert!(hatch.len() > plain.iter().filter(|s| s.len() == 2).count() + 10, "no shading hatch");
+        let (west, east) = hatch.iter().fold((0, 0), |(w, e), s| {
+            let x = (s[0].0 + s[1].0) * 0.5;
+            if x < 27.0 { (w + 1, e) } else if x > 33.0 { (w, e + 1) } else { (w, e) }
+        });
+        assert!(west > east * 2, "{west} hatch lines in shadow vs {east} lit");
     }
 
     #[test]
