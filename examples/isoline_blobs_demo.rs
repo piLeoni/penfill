@@ -3,7 +3,7 @@
 
 use penfill::geo::{Pt, Region};
 use penfill::isoline_blobs::{default_params, fill_isoline_blobs_with_coverage};
-use penfill::isoline_stack::{fill_isoline_stack_with_coverage, EdgeMode, IsolineStackParams};
+use penfill::isoline_stack::{fill_isoline_stack_with_coverage, EdgeMode, IsolineStackParams, Light};
 
 fn main() {
     let square = Region::from_ring(&[(0.0, 0.0), (120.0, 0.0), (120.0, 120.0), (0.0, 120.0)]);
@@ -19,6 +19,15 @@ fn main() {
     let dense = IsolineStackParams { seed: 42, coverage: 1.0, edge: EdgeMode::Inside, ..Default::default() };
     let out = fill_isoline_stack_with_coverage(&park, &dense);
     write("examples/gallery/isoline-stack-dense.svg", &park, &out.strokes);
+
+    let lit = IsolineStackParams {
+        seed: 42,
+        edge: EdgeMode::Inside,
+        light: Some(Light { from_deg: -45.0, strength: 0.85 }),
+        ..Default::default()
+    };
+    let out = fill_isoline_stack_with_coverage(&park, &lit);
+    write("examples/gallery/isoline-stack-lit.svg", &park, &out.strokes);
 }
 
 /// An irregular park outline with a pond-shaped hole, ~120 mm across.

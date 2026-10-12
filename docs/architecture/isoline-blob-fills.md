@@ -89,13 +89,19 @@ Tests: `draws_inside_the_region`, `inside_mode_never_touches_the_boundary`, `ove
 
 Cost: `slices` × (frame area / cell²) field samples; ~4 s for a 120 mm park in release.
 
+### Light (implemented)
+
+`IsolineStackParams.light: Option<Light>` — `Light { from_deg, strength }`. One direction for the whole fill: in `crown_balls`, each satellite sphere's radius and height scale by `1 − shade · k` where `shade = strength · dot(unit offset from the crown's centre, light direction)`. Spheres on the far side from the light (`shade < 0`) swell and climb; spheres on the near side thin and flatten. The trunk sphere sits at the crown's own centre, so its offset is zero and it is never shaded. No change to sampling, slicing or ink weight — the effect is entirely in where the spheres sit before the field is built.
+
+`from_deg`: degrees, 0 = +x, 90 = +y, the direction light comes *from*. `strength`: 0–1 (clamped); 0.65 on radius, 0.5 on height at `strength = 1`. Test: `light_makes_the_shadow_side_denser_than_the_lit_side`, comparing ink length on each side of a single crown's centre with a dead zone around it (a bulge that swells past the midline would otherwise get counted on the wrong side).
+
 ## Preview
 
-`examples/isoline_blobs_demo.rs` (`cargo run --release --example isoline_blobs_demo`) writes `isoline-blobs-scattered.svg` and `isoline-stack-{clip,inside,overflow,dense}.svg` (an irregular park with a pond hole) to `examples/gallery/`. Copies live in draw.land's docs.
+`examples/isoline_blobs_demo.rs` (`cargo run --release --example isoline_blobs_demo`) writes `isoline-blobs-scattered.svg` and `isoline-stack-{clip,inside,overflow,dense,lit}.svg` (an irregular park with a pond hole) to `examples/gallery/`. Copies live in draw.land's docs.
 
 ## Open follow-ups
 
-- Light bias (tilt `threshold`/level spacing by a direction) — not implemented.
+- Light on `isoline_blobs` (the flat field) — not implemented; only `isoline_stack` has `Light` today.
 - Streaming (`_into` + `Sink`) — not implemented; whole-field sampling today, fine at map-fill scales tried so far, revisit if a host area makes memory a concern.
 - Bindings (Python/Node/WASM) — not exposed yet; follow the pattern of other `field`-based fills (`textures::fill_marble`) once the Rust API is considered stable.
 

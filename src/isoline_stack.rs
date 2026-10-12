@@ -8,6 +8,10 @@
 //! the nested rings of a plain height field ([`crate::isoline_blobs`]),
 //! where every level sits inside the one below.
 //!
+//! [`Light`] rakes every crown from one direction: bubbles swell and climb
+//! on the far side, thin and flatten on the near side, so the stack reads
+//! as lit without changing ink weight or colour.
+//!
 //! Visual target: `drawland/docs/architecture/img/isoline-blob-fills/`.
 
 use crate::geo::{Pt, Region, Strokes};
@@ -42,6 +46,19 @@ pub struct Crown {
     pub height: f64,
 }
 
+/// A sun raking across every crown from one direction: bubbles lean away
+/// from it, so the far side of each bump stands taller and wider — more
+/// overhang, more nested rings — while the near side stays low and tight.
+/// Reads as shading without touching ink colour or width.
+#[derive(Clone, Copy, Debug)]
+pub struct Light {
+    /// Degrees, 0 = +x, 90 = +y: the direction the light comes *from*.
+    pub from_deg: f64,
+    /// 0 – 1: how much a bubble's radius and height shift between the lit
+    /// and shadow side.
+    pub strength: f64,
+}
+
 #[derive(Clone, Debug)]
 pub enum CrownSource {
     /// Scattered over the region, patchy by `coverage`.
@@ -65,6 +82,9 @@ pub struct IsolineStackParams {
     /// 0 – 1-ish: wobble of every outline.
     pub jitter: f64,
     pub edge: EdgeMode,
+    /// A sun from one direction, shading every crown the same way. `None`:
+    /// every crown is lit evenly, as before.
+    pub light: Option<Light>,
 }
 
 impl Default for IsolineStackParams {
@@ -78,6 +98,7 @@ impl Default for IsolineStackParams {
             slices: 14,
             jitter: 0.8,
             edge: EdgeMode::Clip,
+            light: None,
         }
     }
 }
@@ -112,7 +133,11 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
         EdgeMode::Inside => Some(0.0),
         EdgeMode::Overflow(m) => Some(m.max(0.0)),
     };
-    let balls: Vec<Ball> = crowns.iter().flat_map(|c| crown_balls(c, bubble, &mut rng)).collect();
+    let light = p.light.map(|l| {
+        let r = l.from_deg.to_radians();
+        ((r.cos(), r.sin()), l.strength.clamp(0.0, 1.0))
+    });
+    let balls: Vec<Ball> = crowns.iter().flat_map(|c| crown_balls(c, bubble, &mut rng, light)).collect();
     let balls = match limit {
         Some(l) => fit_to_limit(region, balls, l),
         None => balls,
@@ -247,8 +272,11 @@ fn along(ring: &[Pt], step: f64) -> Vec<Pt> {
 }
 
 /// A crown as a dome of bubbles: higher and larger towards the middle, so
-/// its top layers overhang its own flanks.
-fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng) -> Vec<Ball> {
+/// its top layers overhang its own flanks. `light`: a direction and
+/// strength bubbles lean away from — their radius and height grow on the
+/// far side, shrink on the near side, so rings read dense in the shadow
+/// and sparse where lit.
+fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng, light: Option<((f64, f64), f64)>) -> Vec<Ball> {
     let radius = c.radius.max(bubble);
     let n = ((radius / bubble).powi(2) * 1.4).round().clamp(1.0, 90.0) as usize;
     let mut out = Vec::with_capacity(n + 1);
@@ -256,9 +284,13 @@ fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng) -> Vec<Ball> {
     for _ in 0..n {
         let t = rng.range(0.0, 1.0).sqrt() * 0.85;
         let a = rng.range(0.0, std::f64::consts::TAU);
-        let rb = bubble * rng.range(0.7, 1.3) * (1.15 - 0.4 * t);
-        let z = c.height * (1.0 - t * t).sqrt() * rng.range(0.7, 1.0);
-        out.push(Ball { x: c.at.0 + radius * t * a.cos(), y: c.at.1 + radius * t * a.sin(), z, r: rb / VISIBLE });
+        let (sa, ca) = a.sin_cos();
+        // `shade` is +1 toward the light, -1 away from it: the far side
+        // (shade < 0) is in shadow and swells; the near side thins.
+        let shade = light.map_or(0.0, |((lx, ly), strength)| strength * (ca * lx + sa * ly));
+        let rb = bubble * rng.range(0.7, 1.3) * (1.15 - 0.4 * t) * (1.0 - shade * 0.65);
+        let z = c.height * (1.0 - t * t).sqrt() * rng.range(0.7, 1.0) * (1.0 - shade * 0.5);
+        out.push(Ball { x: c.at.0 + radius * t * ca, y: c.at.1 + radius * t * sa, z, r: rb / VISIBLE });
     }
     out
 }
@@ -420,6 +452,33 @@ mod tests {
         for p in outside {
             assert!(host.dist_to_boundary(*p) <= m + 1e-6, "{p:?} too far out");
         }
+    }
+
+    #[test]
+    fn light_makes_the_shadow_side_denser_than_the_lit_side() {
+        // Light from +x (0°): the shadow is on -x, so that half should hold
+        // more ink (rings pack tighter, bulges swell) than the +x half. A
+        // dead zone around the crown's own centre keeps a bulge that swells
+        // past the midline from being counted on the wrong side.
+        let crowns = vec![Crown { at: (30.0, 30.0), radius: 8.0, height: 6.0 }];
+        let lit = IsolineStackParams {
+            crowns: CrownSource::Crowns(crowns),
+            light: Some(Light { from_deg: 0.0, strength: 0.9 }),
+            jitter: 0.0,
+            ..params(EdgeMode::Clip)
+        };
+        let out = fill_isoline_stack_with_coverage(&square(), &lit);
+        let ink_past = |x_min: f64, x_max: f64| -> f64 {
+            out.strokes
+                .iter()
+                .flat_map(|s| s.windows(2))
+                .filter(|w| w[0].0 >= x_min && w[0].0 < x_max && w[1].0 >= x_min && w[1].0 < x_max)
+                .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+                .sum()
+        };
+        let shadow = ink_past(0.0, 24.0);
+        let sunlit = ink_past(36.0, 60.0);
+        assert!(shadow > sunlit * 1.3, "shadow {shadow:.1} should clearly outweigh the lit side {sunlit:.1}");
     }
 
     #[test]
