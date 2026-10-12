@@ -15,6 +15,7 @@ pub mod dotswaves;
 pub mod field;
 pub mod geo;
 pub mod grass;
+pub mod growth;
 pub mod hilbert;
 pub mod isoline_blobs;
 pub mod isoline_stack;
