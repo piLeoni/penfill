@@ -69,7 +69,7 @@ pub struct Light {
 
 impl Default for Light {
     fn default() -> Self {
-        Light { from_deg: 135.0, strength: 0.8, elevation_deg: 35.0, hatch: 0.4 }
+        Light { from_deg: 135.0, strength: 0.8, elevation_deg: 35.0, hatch: 0.0 }
     }
 }
 
@@ -171,7 +171,7 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     let z_hi = balls.iter().map(|b| b.z + b.r).fold(f64::MIN, f64::max);
     let dz = (z_hi - z_lo) / p.slices as f64;
 
-    let mut shade = p.light.filter(|l| l.hatch > 0.0 && l.strength > 0.0).map(|_| Surface::new(&frame, bubble));
+    let mut shade = p.light.filter(|l| l.strength > 0.0).map(|_| Surface::new(&frame, bubble));
     let mut strokes: Strokes = Vec::new();
     let mut above = Region::default();
     for k in (0..p.slices).rev() {
@@ -227,8 +227,10 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     strokes.reverse();
     if let (Some(mut s), Some(l)) = (shade, p.light) {
         s.light(z_lo - dz, l, bubble);
-        strokes = s.break_highlights(&strokes, l.strength);
-        strokes.extend(s.hatching(&keep, l));
+        strokes = s.break_highlights(&strokes, l.strength, bubble);
+        if l.hatch > 0.0 {
+            strokes.extend(s.hatching(&keep, l));
+        }
     }
     FillWithCoverage { strokes: keep.clip_strokes(&strokes), coverage: above.intersection(&keep) }
 }
@@ -246,6 +248,8 @@ struct Surface {
     dark: Vec<f64>,
     /// Light on the surface relative to a flat top: above 1 faces the sun.
     glare: Vec<f64>,
+    /// Cells under some slice: the canopy's footprint.
+    covered: Vec<bool>,
 }
 
 impl Surface {
@@ -254,7 +258,7 @@ impl Surface {
         let step = (bubble * 0.2).clamp(0.12, 0.5);
         let nx = ((x1 - x0) / step).ceil() as usize + 1;
         let ny = ((y1 - y0) / step).ceil() as usize + 1;
-        Surface { x0, y0, step, nx, ny, h: vec![f64::NAN; nx * ny], dark: Vec::new(), glare: Vec::new() }
+        Surface { x0, y0, step, nx, ny, h: vec![f64::NAN; nx * ny], dark: Vec::new(), glare: Vec::new(), covered: Vec::new() }
     }
 
     fn at(&self, i: usize, j: usize) -> Pt {
@@ -280,6 +284,7 @@ impl Surface {
     /// Smooth the terraces into a surface, then light it: Lambert against a
     /// sun at `elevation_deg`, and cast shadows marched towards the sun.
     fn light(&mut self, ground: f64, l: Light, bubble: f64) {
+        self.covered = self.h.iter().map(|v| !v.is_nan()).collect();
         for v in &mut self.h {
             if v.is_nan() {
                 *v = ground;
@@ -344,13 +349,39 @@ impl Surface {
     }
 
     /// Outlines broken where the sun hits the surface full on.
-    fn break_highlights(&self, strokes: &Strokes, strength: f64) -> Strokes {
-        let limit = 1.5 - 0.3 * strength.clamp(0.0, 1.0);
+    /// Whether `q` sits on the footprint's edge, which always stays drawn.
+    fn on_perimeter(&self, q: Pt) -> bool {
+        let i = ((q.0 - self.x0) / self.step).round() as i64;
+        let j = ((q.1 - self.y0) / self.step).round() as i64;
+        for dj in -1..=1 {
+            for di in -1..=1 {
+                let (a, b) = (i + di, j + dj);
+                if a < 0 || b < 0 || a >= self.nx as i64 || b >= self.ny as i64 {
+                    return true;
+                }
+                if !self.covered[b as usize * self.nx + a as usize] {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn break_highlights(&self, strokes: &Strokes, strength: f64, bubble: f64) -> Strokes {
+        let strength = strength.clamp(0.0, 1.0);
+        let period = (bubble * 0.6).max(0.3);
         let mut out = Vec::new();
-        for s in strokes {
+        for (n, s) in strokes.iter().enumerate() {
+            // Per-stroke phase so the gaps don't line up ring to ring.
+            let phase = ((n as f64) * 0.618_034).fract();
             let mut run: Vec<Pt> = Vec::new();
-            for &q in s {
-                if self.lookup(&self.glare, q) > limit {
+            let mut along = 0.0;
+            for (i, &q) in s.iter().enumerate() {
+                if i > 0 {
+                    along += (q.0 - s[i - 1].0).hypot(q.1 - s[i - 1].1);
+                }
+                let gap = if self.on_perimeter(q) { 0.0 } else { ((self.lookup(&self.glare, q) - 1.0) / 0.6 * strength * 1.2).clamp(0.0, 0.85) };
+                if ((along / period) + phase).fract() < gap {
                     if run.len() >= 2 {
                         out.push(std::mem::take(&mut run));
                     }
@@ -518,7 +549,7 @@ fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng, light: Option<((f64, f64),
         // `shade` is +1 toward the light, -1 away from it: the far side
         // (shade < 0) is in shadow and swells; the near side thins.
         let shade = light.map_or(0.0, |((lx, ly), strength)| strength * (ca * lx + sa * ly));
-        let rb = bubble * rng.range(0.7, 1.3) * (1.15 - 0.4 * t) * (1.0 - shade * 0.65);
+        let rb = bubble * (0.45 + 1.4 * rng.range(0.0, 1.0).powi(2)) * (1.15 - 0.4 * t) * (1.0 - shade * 0.65);
         let z = c.height * (1.0 - t * t).sqrt() * rng.range(0.7, 1.0) * (1.0 - shade * 0.5);
         out.push(Ball { x: c.at.0 + radius * t * ca, y: c.at.1 + radius * t * sa, z, r: rb / VISIBLE });
     }
@@ -712,20 +743,24 @@ mod tests {
     }
 
     #[test]
-    fn shading_hatches_the_side_away_from_the_light() {
-        // Light from +x: the hatch belongs on the crown's -x flank.
+    fn lit_side_has_more_gaps_in_the_rings() {
+        // Light from +x: rings break into dashes on the +x (sunlit) flank.
         let crowns = vec![Crown { at: (30.0, 30.0), radius: 10.0, height: 8.0 }];
         let base = IsolineStackParams { crowns: CrownSource::Crowns(crowns), jitter: 0.0, ..params(EdgeMode::Clip) };
-        let plain = fill_isoline_stack_with_coverage(&square(), &base).strokes;
-        let lit = IsolineStackParams { light: Some(Light { from_deg: 0.0, ..Light::default() }), ..base };
-        let shaded = fill_isoline_stack_with_coverage(&square(), &lit).strokes;
-        let hatch: Vec<&Vec<Pt>> = shaded.iter().filter(|s| s.len() == 2).collect();
-        assert!(hatch.len() > plain.iter().filter(|s| s.len() == 2).count() + 10, "no shading hatch");
-        let (west, east) = hatch.iter().fold((0, 0), |(w, e), s| {
-            let x = (s[0].0 + s[1].0) * 0.5;
-            if x < 27.0 { (w + 1, e) } else if x > 33.0 { (w, e + 1) } else { (w, e) }
-        });
-        assert!(west > east * 2, "{west} hatch lines in shadow vs {east} lit");
+        let lit = IsolineStackParams { light: Some(Light { from_deg: 0.0, strength: 0.9, ..Light::default() }), ..base };
+        let strokes = fill_isoline_stack_with_coverage(&square(), &lit).strokes;
+        let ink = |x0: f64, x1: f64| {
+            strokes
+                .iter()
+                .flat_map(|s| s.windows(2))
+                .filter(|w| {
+                    let x = (w[0].0 + w[1].0) * 0.5;
+                    x >= x0 && x <= x1
+                })
+                .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+                .sum::<f64>()
+        };
+        assert!(ink(36.0, 60.0) < ink(0.0, 24.0) * 0.85, "lit side should read sparser than shadow");
     }
 
     #[test]

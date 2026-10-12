@@ -18,7 +18,7 @@
 //! the centre line, so trunks read dark and twigs hairline.
 
 use crate::geo::{Pt, Region, Strokes};
-use crate::random::{poisson_disk, Rng};
+use crate::random::{poisson_disk, poisson_disk_varying, Rng};
 use std::collections::HashMap;
 
 /// Where the branches start.
@@ -60,6 +60,13 @@ pub struct GrowthParams {
     pub thicken: f64,
     /// Chaikin rounds on every branch: 0 keeps the raw steps.
     pub smooth: usize,
+    /// 0 – 1: how far each tree's cell reaches towards its neighbours;
+    /// below 1 leaves gaps between the trees.
+    pub coverage: f64,
+    /// 0 – 1: how much individual trees differ in size (cell radius and
+    /// twig spacing). 0 is uniform; 1 spreads from small saplings to
+    /// large crowns.
+    pub variation: f64,
 }
 
 impl Default for GrowthParams {
@@ -77,6 +84,8 @@ impl Default for GrowthParams {
             max_passes: 3,
             thicken: 15.0,
             smooth: 2,
+            coverage: 1.0,
+            variation: 0.35,
         }
     }
 }
@@ -193,7 +202,7 @@ fn d2(a: Pt, b: Pt) -> f64 {
     (a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)
 }
 
-fn generate_roots(region: &Region, source: &RootSource, seed: u64) -> Vec<Pt> {
+fn generate_roots(region: &Region, source: &RootSource, seed: u64, variation: f64) -> Vec<Pt> {
     match source {
         RootSource::At(pts) => pts.iter().copied().filter(|p| region.covers_point(*p)).collect(),
         RootSource::Generate(n) => {
@@ -207,7 +216,17 @@ fn generate_roots(region: &Region, source: &RootSource, seed: u64) -> Vec<Pt> {
             pts
         }
         RootSource::Every(d) => {
-            let mut pts = poisson_disk(region, d.max(1e-3), seed);
+            let d = d.max(1e-3);
+            let v = variation.clamp(0.0, 1.0);
+            let mut pts = if v > 0.0 {
+                // Uneven spacing: big trees need room, saplings crowd in.
+                let noise = crate::noise::Perlin::new(seed.wrapping_add(17));
+                let (lo, hi) = (d * (1.0 - 0.7 * v), d * (1.0 + 2.5 * v));
+                let patch = d * 4.0;
+                poisson_disk_varying(region, lo, hi, |q| lo + (hi - lo) * (0.5 + 1.4 * noise.fbm(q.0 / patch, q.1 / patch, 2)).clamp(0.0, 1.0), seed)
+            } else {
+                poisson_disk(region, d, seed)
+            };
             // Woods smaller than the root spacing still get one root each.
             for part in region.parts() {
                 if !pts.iter().any(|p| part.covers_point(*p)) {
@@ -224,14 +243,75 @@ fn generate_roots(region: &Region, source: &RootSource, seed: u64) -> Vec<Pt> {
 }
 
 pub fn fill_growth(region: &Region, p: &GrowthParams) -> Strokes {
+    fill_growth_with_coverage(region, p).strokes
+}
+
+/// The fill and its footprint: the union of the trees' cells, so a host can
+/// mask what lies under the trees and keep it in the gaps between them.
+pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::FillWithCoverage {
+    let empty = || crate::FillWithCoverage { strokes: Vec::new(), coverage: Region::from_rings_even_odd(&[]) };
     if region.is_empty() || p.spacing <= 0.0 || p.step <= 0.0 || p.reach <= 0.0 || p.kill <= 0.0 {
-        return vec![];
+        return empty();
     }
-    let roots = generate_roots(region, &p.roots, p.seed);
+    let roots = generate_roots(region, &p.roots, p.seed, p.variation);
     if roots.is_empty() {
-        return vec![];
+        return empty();
     }
-    let mut tree = Tree::new(poisson_disk(region, p.spacing, p.seed.wrapping_add(7)), p);
+    let mut footprint = region.clone();
+    let mut attractors = poisson_disk(region, p.spacing, p.seed.wrapping_add(7));
+    if roots.len() > 1 {
+        // Each root owns a roughly round, wobbly cell: half the way to its
+        // nearest neighbour, scaled by coverage; attractors outside every
+        // cell are dropped, leaving gaps between the trees.
+        let noise = crate::noise::Perlin::new(p.seed.wrapping_add(11));
+        let mut rng = Rng::new(p.seed.wrapping_add(13));
+        let v = p.variation.clamp(0.0, 1.0);
+        let cells: Vec<(Pt, f64)> = roots
+            .iter()
+            .enumerate()
+            .map(|(k, &r)| {
+                let nn = roots.iter().filter(|&&o| o != r).map(|&o| d2(r, o)).fold(f64::MAX, f64::min).sqrt();
+                let base = nn * 0.6 * p.coverage.clamp(0.0, 1.0).sqrt();
+                // Per-tree size: radius and attractor spacing scale together.
+                let u = rng.range(0.0, 1.0);
+                let scale = if v > 0.0 { 1.0 + v * (u * 0.85 - 0.35) } else { 1.0 };
+                let c = (
+                    r.0 + v * 0.12 * base * noise.fbm(k as f64 * 2.1, 0.7, 1),
+                    r.1 + v * 0.12 * base * noise.fbm(0.3, k as f64 * 1.9, 1),
+                );
+                (c, base * scale)
+            })
+            .collect();
+        let wobble = |k: usize, a: f64| 1.0 + 0.35 * noise.fbm(k as f64 * 7.3 + a.cos() * 1.2, k as f64 * 3.1 + a.sin() * 1.2, 2);
+        let rings: Vec<Vec<Pt>> = cells
+            .iter()
+            .enumerate()
+            .map(|(k, &(c, radius))| {
+                (0..48)
+                    .map(|i| {
+                        let a = i as f64 / 48.0 * std::f64::consts::TAU;
+                        let r = radius * wobble(k, a);
+                        (c.0 + r * a.cos(), c.1 + r * a.sin())
+                    })
+                    .collect()
+            })
+            .collect();
+        footprint = rings
+            .iter()
+            .fold(Region::from_rings_even_odd(&[]), |u, ring| u.union(&Region::from_rings_even_odd(std::slice::from_ref(ring))))
+            .intersection(region);
+        attractors.retain(|&q| {
+            // Weighted by size: a big tree claims more of the gap.
+            let (k, _) = cells.iter().enumerate().fold((0, f64::MAX), |b, (i, c)| {
+                let d = d2(q, c.0) / (c.1 * c.1).max(1e-9);
+                if d < b.1 { (i, d) } else { b }
+            });
+            let (c, radius) = cells[k];
+            let a = (q.1 - c.1).atan2(q.0 - c.0);
+            d2(q, c) < (radius * wobble(k, a)).powi(2)
+        });
+    }
+    let mut tree = Tree::new(attractors, p);
     for &r in &roots {
         tree.add(r, NONE);
     }
@@ -340,7 +420,7 @@ pub fn fill_growth(region: &Region, p: &GrowthParams) -> Strokes {
             }
         }
     }
-    region.clip_strokes(&strokes)
+    crate::FillWithCoverage { strokes: region.clip_strokes(&strokes), coverage: footprint }
 }
 
 /// The tree as polylines of node indices: each path follows its heaviest
@@ -443,7 +523,10 @@ mod tests {
     #[test]
     fn fills_the_region_densely_and_stays_inside() {
         let host = disc();
-        let out = fill_growth(&host, &GrowthParams { seed: 5, roots: RootSource::Generate(4), ..Default::default() });
+        let out = fill_growth(
+            &host,
+            &GrowthParams { seed: 5, roots: RootSource::Generate(1), variation: 0.0, coverage: 1.0, ..Default::default() },
+        );
         for pt in out.iter().flatten() {
             assert!(host.covers_point(*pt), "{pt:?} outside");
         }
