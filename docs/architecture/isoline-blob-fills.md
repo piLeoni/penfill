@@ -78,10 +78,10 @@ The flat field above can only nest: every level sits inside the one below, so no
 | Mode | Placement | Guarantee |
 | --- | --- | --- |
 | `Clip` | crowns over the region grown by one crown | strokes cut at the boundary |
-| `Inside` | crowns in the region; spheres shrunk to fit | field faded to zero **at** the boundary: every outline closes inside, none is cut |
+| `Inside` | crowns in the region plus a lining row `crown · 0.55` inside every ring (so narrow woods fill); spheres shrunk to fit | field faded to zero **at** the boundary: every outline closes inside, none is cut |
 | `Overflow(m)` | plus a row of crowns standing on every boundary ring | field faded to zero `m` mm **outside**: outlines close within `m` past the border |
 
-The fade (`Fade`) is a coarse grid of signed boundary distances, interpolated and smoothstepped over `bubble · 0.6`; it is evaluated at the *unwarped* sample, so the wobble cannot carry ink past the limit. Spheres are also shrunk toward the limit first (`fit_to_limit`), so the edge stays lumpy instead of being pressed flat.
+The fade (`Fade`) is a coarse grid of signed boundary distances, interpolated and smoothstepped over `bubble · 0.35`; it is evaluated at the *unwarped* sample, so the wobble cannot carry ink past the limit. Spheres are first shrunk so their support radius is at most `room / 0.95` (`fit_to_limit`): each one rounds off well before the limit and the fade only catches what merging pushes further. Letting spheres reach the limit makes neighbours merge into one outline pressed flat along the border, which reads as a cut.
 
 `coverage` (0–1) thins generated crowns with low-frequency noise into woods and clearings; `CrownSource::Crowns` takes known crowns (position, radius, height) instead. The returned `coverage` region is the union of every slice — the canopy's footprint, for masks.
 

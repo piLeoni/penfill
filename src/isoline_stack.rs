@@ -120,7 +120,6 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     if balls.is_empty() {
         return FillWithCoverage::default();
     }
-
     let cell = (bubble * 0.1).clamp(0.05, 0.3);
     let frame = frame_around(&balls, warp + 2.0 * cell);
     let fade = limit.map(|l| Fade::new(region, &frame, l, bubble));
@@ -196,15 +195,29 @@ fn generate_crowns(region: &Region, p: &IsolineStackParams, rng: &mut Rng) -> Ve
     let scale = p.crown * 5.0;
     let threshold = 0.6 - 1.2 * coverage;
     let spacing = p.crown * (1.6 - 0.4 * coverage);
-    let mut sites: Vec<Pt> = poisson_disk(&spread, spacing, p.seed)
-        .into_iter()
-        .filter(|c| coverage >= 1.0 || patches.fbm(c.0 / scale, c.1 / scale, 3) > threshold)
-        .collect();
-    if let EdgeMode::Overflow(_) = p.edge {
-        sites.retain(|c| region.dist_to_boundary(*c) > spacing * 0.6);
-        for ring in region.all_rings_mm() {
-            sites.extend(along(&ring, spacing * 0.8));
+    let patch = |c: Pt| coverage >= 1.0 || patches.fbm(c.0 / scale, c.1 / scale, 3) > threshold;
+    let mut sites: Vec<Pt> = poisson_disk(&spread, spacing, p.seed).into_iter().filter(|c| patch(*c)).collect();
+    match p.edge {
+        EdgeMode::Overflow(_) => {
+            sites.retain(|c| region.dist_to_boundary(*c) > spacing * 0.6);
+            for ring in region.all_rings_mm() {
+                sites.extend(along(&ring, spacing * 0.8).into_iter().filter(|c| patch(*c)));
+            }
         }
+        // A row just inside the border for narrow woods, thinned by the same
+        // patch noise as the interior so low `coverage` is not a solid rim.
+        EdgeMode::Inside => {
+            let inset = p.crown * 0.55;
+            sites.retain(|c| region.dist_to_boundary(*c) > inset + spacing * 0.6);
+            if coverage >= 0.35 {
+                let lining = region.inset(inset);
+                let step = spacing * 0.75 / coverage.sqrt();
+                for ring in lining.all_rings_mm() {
+                    sites.extend(along(&ring, step).into_iter().filter(|c| patch(*c)));
+                }
+            }
+        }
+        EdgeMode::Clip => {}
     }
     sites
         .into_iter()
@@ -250,15 +263,16 @@ fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng) -> Vec<Ball> {
     out
 }
 
-/// Shrink (or drop) bubbles whose outline would pass the limit line,
-/// `limit` mm outside the boundary, so the edge stays bubbly rather than
-/// squashed flat by the fade.
+/// Shrink (or drop) bubbles whose outline would come near the limit line,
+/// `limit` mm outside the boundary, so crowns round off on their own and
+/// the fade only catches what merging pushes further: an edge pressed flat
+/// by the fade reads as a cut.
 fn fit_to_limit(region: &Region, balls: Vec<Ball>, limit: f64) -> Vec<Ball> {
     balls
         .into_iter()
         .filter_map(|mut b| {
             let room = signed_inside(region, (b.x, b.y)) + limit;
-            let fits = room / VISIBLE;
+            let fits = room / 0.95;
             if fits < b.r * 0.35 {
                 return None;
             }
@@ -299,7 +313,7 @@ impl Fade {
                 room.push(signed_inside(region, (x0 + i as f64 * step, y0 + j as f64 * step)) + limit);
             }
         }
-        Fade { x0, y0, step, nx, ny, room, band: bubble * 0.6 }
+        Fade { x0, y0, step, nx, ny, room, band: bubble * 0.35 }
     }
 
     fn at(&self, p: Pt) -> f64 {
