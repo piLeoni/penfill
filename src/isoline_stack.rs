@@ -124,6 +124,9 @@ struct Ball {
     z: f64,
     /// Support radius: the field is zero past it.
     r: f64,
+    /// Which crown this ball belongs to, so adjacent crowns keep crown shyness
+    /// instead of melting into one giant cloud.
+    crown_id: usize,
 }
 
 pub fn fill_isoline_stack(region: &Region, p: &IsolineStackParams) -> Strokes {
@@ -135,7 +138,7 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
         return FillWithCoverage::default();
     }
     let bubble = p.bubble.min(p.crown);
-    let warp = p.jitter.max(0.0) * bubble * 0.3;
+    let warp = p.jitter.max(0.0) * bubble * 0.22;
     let mut rng = Rng::new(p.seed.wrapping_add(71));
 
     let crowns = match &p.crowns {
@@ -151,7 +154,11 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
         let r = l.from_deg.to_radians();
         ((r.cos(), r.sin()), l.strength.clamp(0.0, 1.0))
     });
-    let balls: Vec<Ball> = crowns.iter().flat_map(|c| crown_balls(c, bubble, &mut rng, light)).collect();
+    let balls: Vec<Ball> = crowns
+        .iter()
+        .enumerate()
+        .flat_map(|(id, c)| crown_balls(id, c, bubble, &mut rng, light))
+        .collect();
     let balls = match limit {
         Some(l) => fit_to_limit(region, balls, l),
         None => balls,
@@ -165,7 +172,7 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     let jitter_noise = Perlin::new(p.seed.wrapping_add(5));
     let warp_x = Perlin::new(p.seed.wrapping_add(6));
     let warp_y = Perlin::new(p.seed.wrapping_add(7));
-    let wobble = bubble * 0.7;
+    let wobble = (bubble * 0.65).max(0.22);
 
     let z_lo = balls.iter().map(|b| b.z - b.r).fold(f64::MAX, f64::min);
     let z_hi = balls.iter().map(|b| b.z + b.r).fold(f64::MIN, f64::max);
@@ -176,10 +183,10 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     let mut above = Region::default();
     for k in (0..p.slices).rev() {
         let z = z_lo + (k as f64 + 0.5) * dz;
-        let cut: Vec<(f64, f64, f64)> = balls
+        let cut: Vec<(f64, f64, f64, usize)> = balls
             .iter()
             .filter(|b| (z - b.z).abs() < b.r)
-            .map(|b| (b.x, b.y, b.r * b.r - (z - b.z).powi(2)))
+            .map(|b| (b.x, b.y, b.r * b.r - (z - b.z).powi(2), b.crown_id))
             .collect();
         if cut.is_empty() {
             continue;
@@ -188,7 +195,13 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
         let f = |q: Pt| {
             let (x, y) = if warp > 0.0 {
                 let (u, v) = (q.0 / wobble, q.1 / wobble);
-                (q.0 + warp * warp_x.fbm(u + z * 0.31, v, 2), q.1 + warp * warp_y.fbm(u, v - z * 0.27, 2))
+                let wx = warp_x.fbm(u + z * 0.23, v, 2);
+                let wy = warp_y.fbm(u, v - z * 0.21, 2);
+                // Sharpen the domain warp slightly so lobes arch outward and pinch
+                // at cusps without spawning detached island pebbles.
+                let sx = wx.signum() * wx.abs().powf(0.75);
+                let sy = wy.signum() * wy.abs().powf(0.75);
+                (q.0 + warp * sx, q.1 + warp * sy)
             } else {
                 q
             };
@@ -200,7 +213,16 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
             if let Some(fade) = &fade {
                 h *= fade.at(q);
             }
-            h * (1.0 + p.jitter * 0.8 * jitter_noise.fbm(x / wobble + z * 0.43, y / wobble - z * 0.37, 2))
+            if p.jitter > 0.0 {
+                // Non-positive cusp indent: pinches existing concentric rings inward
+                // at sharp cusps (making them leafy/scalloped) while never exceeding 1.0,
+                // so it is mathematically impossible for noise to pop detached pebble
+                // islands out of a sub-threshold region.
+                let n1 = jitter_noise.fbm(x / wobble + z * 0.31, y / wobble - z * 0.27, 2);
+                let indent = (n1 * 2.1).abs().min(1.2);
+                h *= (1.0 - p.jitter.min(1.6) * 0.28 * indent).max(0.2);
+            }
+            h
         };
         let loops = crate::field::fill_isolines(&frame, cell, &[ISO], &f);
         if let Some(s) = &mut shade {
@@ -227,7 +249,7 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
     strokes.reverse();
     if let (Some(mut s), Some(l)) = (shade, p.light) {
         s.light(z_lo - dz, l, bubble);
-        strokes = s.break_highlights(&strokes, l.strength, bubble);
+        strokes = s.break_highlights(&strokes, l.strength, bubble, l.hatch > 0.0);
         if l.hatch > 0.0 {
             strokes.extend(s.hatching(&keep, l));
         }
@@ -367,9 +389,9 @@ impl Surface {
         false
     }
 
-    fn break_highlights(&self, strokes: &Strokes, strength: f64, bubble: f64) -> Strokes {
+    fn break_highlights(&self, strokes: &Strokes, strength: f64, bubble: f64, hatched: bool) -> Strokes {
         let strength = strength.clamp(0.0, 1.0);
-        let period = (bubble * 0.6).max(0.3);
+        let period = (bubble * 0.65).max(0.35);
         let mut out = Vec::new();
         for (n, s) in strokes.iter().enumerate() {
             // Per-stroke phase so the gaps don't line up ring to ring.
@@ -380,7 +402,18 @@ impl Surface {
                 if i > 0 {
                     along += (q.0 - s[i - 1].0).hypot(q.1 - s[i - 1].1);
                 }
-                let gap = if self.on_perimeter(q) { 0.0 } else { ((self.lookup(&self.glare, q) - 1.0) / 0.6 * strength * 1.2).clamp(0.0, 0.85) };
+                let gap = if self.on_perimeter(q) {
+                    0.0
+                } else {
+                    let g = self.lookup(&self.glare, q);
+                    if hatched {
+                        // In hatched mode, break interior rings more openly so the
+                        // diagonal shade hatches sit in an airy crown interior.
+                        ((g - 0.82) / 0.55 * strength * 1.15).clamp(0.0, 0.90)
+                    } else {
+                        ((g - 1.0) / 0.6 * strength * 1.2).clamp(0.0, 0.85)
+                    }
+                };
                 if ((along / period) + phase).fract() < gap {
                     if run.len() >= 2 {
                         out.push(std::mem::take(&mut run));
@@ -480,21 +513,23 @@ fn generate_crowns(region: &Region, p: &IsolineStackParams, rng: &mut Rng) -> Ve
     let patches = Perlin::new(p.seed.wrapping_add(3));
     let scale = p.crown * 5.0;
     let threshold = 0.6 - 1.2 * coverage;
-    let spacing = p.crown * (1.6 - 0.4 * coverage);
-    let patch = |c: Pt| coverage >= 1.0 || patches.fbm(c.0 / scale, c.1 / scale, 3) > threshold;
+    // As `coverage -> 1.0`, crowns pack tightly (`1.05 * crown`) so the whole
+    // starting polygon is filled with no clearings.
+    let spacing = p.crown * (1.85 - 0.80 * coverage);
+    let patch = |c: Pt| coverage >= 0.99 || patches.fbm(c.0 / scale, c.1 / scale, 3) > threshold;
     let mut sites: Vec<Pt> = poisson_disk(&spread, spacing, p.seed).into_iter().filter(|c| patch(*c)).collect();
     match p.edge {
         EdgeMode::Overflow(_) => {
-            sites.retain(|c| region.dist_to_boundary(*c) > spacing * 0.6);
+            sites.retain(|c| region.dist_to_boundary(*c) > spacing * 0.55);
             for ring in region.all_rings_mm() {
-                sites.extend(along(&ring, spacing * 0.8).into_iter().filter(|c| patch(*c)));
+                sites.extend(along(&ring, spacing * 0.78).into_iter().filter(|c| patch(*c)));
             }
         }
         // A row just inside the border for narrow woods, thinned by the same
         // patch noise as the interior so low `coverage` is not a solid rim.
         EdgeMode::Inside => {
-            let inset = p.crown * 0.55;
-            sites.retain(|c| region.dist_to_boundary(*c) > inset + spacing * 0.6);
+            let inset = p.crown * (0.55 - 0.15 * coverage);
+            sites.retain(|c| region.dist_to_boundary(*c) > inset + spacing * 0.55);
             if coverage >= 0.35 {
                 let lining = region.inset(inset);
                 let step = spacing * 0.75 / coverage.sqrt();
@@ -508,8 +543,12 @@ fn generate_crowns(region: &Region, p: &IsolineStackParams, rng: &mut Rng) -> Ve
     sites
         .into_iter()
         .map(|at| {
-            let radius = p.crown * rng.range(0.7, 1.25);
-            Crown { at, radius, height: radius * rng.range(0.6, 1.3) }
+            // Mix of crown sizes; at high coverage the minimum crown radius grows
+            // so packed crowns leave no empty gaps between them.
+            let u = rng.range(0.0, 1.0);
+            let min_r = 0.55 + 0.30 * coverage;
+            let radius = p.crown * (min_r + (1.42 - min_r) * u.powf(1.5));
+            Crown { at, radius, height: radius * rng.range(0.7, 1.35) }
         })
         .collect()
 }
@@ -532,26 +571,39 @@ fn along(ring: &[Pt], step: f64) -> Vec<Pt> {
     out
 }
 
-/// A crown as a dome of bubbles: higher and larger towards the middle, so
-/// its top layers overhang its own flanks. `light`: a direction and
-/// strength bubbles lean away from — their radius and height grow on the
-/// far side, shrink on the near side, so rings read dense in the shadow
-/// and sparse where lit.
-fn crown_balls(c: &Crown, bubble: f64, rng: &mut Rng, light: Option<((f64, f64), f64)>) -> Vec<Ball> {
+/// A crown as a radial dome of foliate boughs: highest at the crown centre and
+/// stepping down smoothly along 5–8 radial bough ridges so horizontal slices cut
+/// clean, nested concentric leaf-lobed rings without isolated interior "pebbles".
+/// `light`: a direction and strength boughs lean away from — their radius and
+/// height grow on the far side, shrink on the near side, so rings pack densely
+/// in the shadow and open up where lit.
+fn crown_balls(crown_id: usize, c: &Crown, bubble: f64, rng: &mut Rng, light: Option<((f64, f64), f64)>) -> Vec<Ball> {
     let radius = c.radius.max(bubble);
-    let n = ((radius / bubble).powi(2) * 1.4).round().clamp(1.0, 90.0) as usize;
-    let mut out = Vec::with_capacity(n + 1);
-    out.push(Ball { x: c.at.0, y: c.at.1, z: c.height * 0.35, r: radius * 0.6 / VISIBLE });
-    for _ in 0..n {
-        let t = rng.range(0.0, 1.0).sqrt() * 0.85;
-        let a = rng.range(0.0, std::f64::consts::TAU);
-        let (sa, ca) = a.sin_cos();
-        // `shade` is +1 toward the light, -1 away from it: the far side
-        // (shade < 0) is in shadow and swells; the near side thins.
-        let shade = light.map_or(0.0, |((lx, ly), strength)| strength * (ca * lx + sa * ly));
-        let rb = bubble * (0.45 + 1.4 * rng.range(0.0, 1.0).powi(2)) * (1.15 - 0.4 * t) * (1.0 - shade * 0.65);
-        let z = c.height * (1.0 - t * t).sqrt() * rng.range(0.7, 1.0) * (1.0 - shade * 0.5);
-        out.push(Ball { x: c.at.0 + radius * t * ca, y: c.at.1 + radius * t * sa, z, r: rb / VISIBLE });
+    let boughs = rng.range(5.0, 8.99) as usize;
+    let steps = ((radius / (bubble * 0.45)).round() as usize).clamp(3, 9);
+    let phase = rng.range(0.0, std::f64::consts::TAU);
+    let mut out = Vec::with_capacity(1 + boughs * steps);
+    // Central apex sphere stands highest so upper slices form a single inner ring
+    // rather than chopping satellite spheres into detached pebbles.
+    out.push(Ball { x: c.at.0, y: c.at.1, z: c.height * 0.78, r: radius * 0.62 / VISIBLE, crown_id });
+    for b in 0..boughs {
+        let base_a = phase + b as f64 * std::f64::consts::TAU / boughs as f64 + rng.range(-0.18, 0.18);
+        let reach = rng.range(0.74, 1.05);
+        let fullness = rng.range(0.88, 1.15);
+        let wiggle = rng.range(-0.18, 0.18);
+        for s in 0..steps {
+            // Normalized progress `u` along the bough from centre (`0`) to tip (`1`).
+            let u = (s as f64 + 0.55) / steps as f64;
+            let t = u * 0.85 * reach;
+            let a = base_a + wiggle * u;
+            let (sa, ca) = a.sin_cos();
+            // `shade` is +1 toward the light, -1 away from it: the far side
+            // (shade < 0) is in shadow and swells; the near side thins.
+            let shade = light.map_or(0.0, |((lx, ly), strength)| strength * (ca * lx + sa * ly));
+            let rb = bubble * fullness * (1.22 - 0.48 * u) * (1.0 - shade * 0.65);
+            let z = c.height * 0.68 * (1.0 - 0.82 * u * u) * (1.0 - shade * 0.48);
+            out.push(Ball { x: c.at.0 + radius * t * ca, y: c.at.1 + radius * t * sa, z, r: rb / VISIBLE, crown_id });
+        }
     }
     out
 }
@@ -633,16 +685,16 @@ fn frame_around(balls: &[Ball], pad: f64) -> Region {
     Region::from_ring(&[(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
 }
 
-/// The spheres cut by one slice, as discs `(x, y, r²)`, bucketed so a
+/// The spheres cut by one slice, as discs `(x, y, r², crown_id)`, bucketed so a
 /// sample only visits its neighbours.
 struct Grid<'a> {
-    discs: &'a [(f64, f64, f64)],
+    discs: &'a [(f64, f64, f64, usize)],
     size: f64,
     cells: HashMap<(i64, i64), Vec<usize>>,
 }
 
 impl<'a> Grid<'a> {
-    fn new(discs: &'a [(f64, f64, f64)]) -> Grid<'a> {
+    fn new(discs: &'a [(f64, f64, f64, usize)]) -> Grid<'a> {
         let size = discs.iter().map(|d| d.2.sqrt()).fold(1e-6, f64::max);
         let mut cells: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
         for (i, d) in discs.iter().enumerate() {
@@ -651,23 +703,54 @@ impl<'a> Grid<'a> {
         Grid { discs, size, cells }
     }
 
-    /// Sum of `(1 - d²/r²)³` over the discs covering `(x, y)`.
+    /// Spheres within the same crown sum additively into boughs; across different
+    /// crowns we blend `best1 + 0.55 * best2` so adjacent trees merge their outer
+    /// lower slices into a shared canopy contour while rising to distinct peaks.
     fn field(&self, x: f64, y: f64) -> f64 {
         let (ci, cj) = ((x / self.size).floor() as i64, (y / self.size).floor() as i64);
-        let mut h = 0.0;
+        let mut by_crown: [(usize, f64); 8] = [(usize::MAX, 0.0); 8];
+        let mut count = 0usize;
         for i in ci - 1..=ci + 1 {
             for j in cj - 1..=cj + 1 {
                 let Some(idx) = self.cells.get(&(i, j)) else { continue };
                 for &k in idx {
-                    let (dx, dy, r2) = (x - self.discs[k].0, y - self.discs[k].1, self.discs[k].2);
+                    let (dx, dy, r2, cid) = (x - self.discs[k].0, y - self.discs[k].1, self.discs[k].2, self.discs[k].3);
                     let q = (dx * dx + dy * dy) / r2;
                     if q < 1.0 {
-                        h += (1.0 - q).powi(3);
+                        let v = (1.0 - q).powi(3);
+                        let mut found = false;
+                        for slot in by_crown.iter_mut().take(count) {
+                            if slot.0 == cid {
+                                slot.1 += v;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found && count < by_crown.len() {
+                            by_crown[count] = (cid, v);
+                            count += 1;
+                        }
                     }
                 }
             }
         }
-        h
+        if count == 0 {
+            return 0.0;
+        }
+        let mut best1 = 0.0;
+        let mut best2 = 0.0;
+        for &(_, v) in by_crown.iter().take(count) {
+            if v > best1 {
+                best2 = best1;
+                best1 = v;
+            } else if v > best2 {
+                best2 = v;
+            }
+        }
+        // Blend across crowns (`best1 + 0.55 * best2`): overlapping crowns merge
+        // their outer lower slices into a shared canopy contour while still
+        // rising to distinct upper peaks.
+        best1 + 0.55 * best2
     }
 }
 

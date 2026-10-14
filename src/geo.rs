@@ -78,22 +78,48 @@ fn ccw(rings: impl IntoIterator<Item = Vec<P>>) -> Vec<Vec<P>> {
 /// i_overlay snaps to an integer grid, so points that were collinear come
 /// back a grid step off the line and survive its own collinear pass.
 fn drop_collinear(mut ring: Vec<P>) -> Vec<P> {
-    let mut i = 0;
-    while ring.len() >= 3 && i < ring.len() {
-        let n = ring.len();
-        let (a, p, b) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+    if ring.len() > 1 && ring.first() == ring.last() {
+        ring.pop();
+    }
+    if ring.len() < 3 {
+        return ring;
+    }
+    let mut out: Vec<P> = Vec::with_capacity(ring.len());
+    let is_collinear = |a: P, p: P, b: P| -> bool {
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let len = dx.hypot(dy);
         let off = ((p[0] - a[0]) * dy - (p[1] - a[1]) * dx).abs();
-        let between = (p[0] - a[0]) * dx + (p[1] - a[1]) * dy >= 0.0 && (p[0] - b[0]) * dx + (p[1] - b[1]) * dy <= 0.0;
-        if between && off <= ON_EDGE_MM * len {
-            ring.remove(i);
-            i = i.saturating_sub(1);
-        } else {
-            i += 1;
+        let between = (p[0] - a[0]) * dx + (p[1] - a[1]) * dy >= 0.0
+            && (p[0] - b[0]) * dx + (p[1] - b[1]) * dy <= 0.0;
+        between && off <= ON_EDGE_MM * len
+    };
+    for p in ring {
+        while out.len() >= 2 && is_collinear(out[out.len() - 2], out[out.len() - 1], p) {
+            out.pop();
         }
+        out.push(p);
     }
-    ring
+    // Check wrap-around at the seam (last and first vertices).
+    let mut start = 0;
+    while out.len() - start >= 3 {
+        let last = out[out.len() - 1];
+        let prev = out[out.len() - 2];
+        let first = out[start];
+        if is_collinear(prev, last, first) {
+            out.pop();
+            continue;
+        }
+        let second = out[start + 1];
+        if is_collinear(last, first, second) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    if start > 0 {
+        out.drain(0..start);
+    }
+    out
 }
 
 /// A polygonal region: one or more outer boundaries, each optionally with
@@ -115,7 +141,8 @@ impl Region {
         Region { shapes, cutter: OnceLock::new() }
     }
 
-    fn cutter(&self) -> &Cutter {
+    /// Pre-built spatial cutter over this region's edges (cached across clones).
+    pub fn cutter(&self) -> &Cutter {
         self.cutter.get_or_init(|| Arc::new(Cutter::new(self)))
     }
 
@@ -136,6 +163,36 @@ impl Region {
             return Region::from_shapes(region);
         }
         Region::from_shapes(region.overlay(&holes, OverlayRule::Difference, FillRule::NonZero))
+    }
+
+    /// Build from already-normalized disjoint polygons (each polygon is `[outer, hole1, hole2, ...]`),
+    /// orienting outers counter-clockwise and holes clockwise without running a boolean union/difference.
+    pub fn from_disjoint_polygons(polygons: &[Vec<Vec<Pt>>]) -> Region {
+        let shapes: Shapes = polygons
+            .iter()
+            .filter_map(|p| {
+                let mut contours = Vec::with_capacity(p.len());
+                for (j, ring) in p.iter().enumerate() {
+                    let mut r = to_p(ring);
+                    if r.len() > 1 && r.first() == r.last() {
+                        r.pop();
+                    }
+                    if r.len() < 3 {
+                        if j == 0 {
+                            return None;
+                        }
+                        continue;
+                    }
+                    let area = ring_area(&r);
+                    if (j == 0 && area < 0.0) || (j > 0 && area > 0.0) {
+                        r.reverse();
+                    }
+                    contours.push(r);
+                }
+                (!contours.is_empty()).then_some(contours)
+            })
+            .collect();
+        Region::from_shapes(shapes)
     }
 
     /// Build from rings filled even-odd: a ring inside another is a hole, a
@@ -170,6 +227,11 @@ impl Region {
             maxy = maxy.max(p[1]);
         }
         (minx, miny, maxx, maxy)
+    }
+
+    /// Each contours' points, without cloning.
+    pub fn iter_rings_mm(&self) -> impl Iterator<Item = impl Iterator<Item = Pt> + '_> + '_ {
+        self.shapes.iter().flatten().map(|r| r.iter().map(|p| (p[0], p[1])))
     }
 
     /// All contours (outers and holes) as mm rings. Fills that pair
@@ -255,6 +317,19 @@ impl Region {
     pub fn clip_strokes(&self, strokes: &Strokes) -> Strokes {
         let cutter = self.cutter();
         strokes.iter().flat_map(|s| cutter.polyline(s)).collect()
+    }
+
+    /// Cut polylines against the region: `invert = false` keeps the inside
+    /// portions; `invert = true` keeps the outside portions.
+    pub fn clip_strokes_mode(&self, strokes: &Strokes, invert: bool) -> Strokes {
+        let cutter = self.cutter();
+        strokes.iter().flat_map(|s| cutter.polyline_mode(s, invert)).collect()
+    }
+
+    /// Clip a single polyline against the region (`invert = false` keeps inside,
+    /// `invert = true` keeps outside).
+    pub fn clip_polyline_mode(&self, pts: &[Pt], invert: bool) -> Strokes {
+        self.cutter().polyline_mode(pts, invert)
     }
 
     /// Common part of two regions.
@@ -661,10 +736,41 @@ impl Cutter {
         }
     }
 
-    /// The inside runs of a polyline, joined where they continue.
+    /// The inside runs of a polyline (or the outside runs when `invert` is true),
+    /// joined where they continue.
     pub fn polyline(&self, pts: &[Pt]) -> Strokes {
+        self.polyline_mode(pts, false)
+    }
+
+    /// Clip a polyline against the region: `invert = false` keeps the inside
+    /// portions; `invert = true` keeps the outside portions (mask subtraction).
+    pub fn polyline_mode(&self, pts: &[Pt], invert: bool) -> Strokes {
+        let want = !invert;
         let mut out: Strokes = Vec::new();
         if pts.len() < 2 {
+            return out;
+        }
+        if self.cells.is_empty() {
+            if invert && polyline_length(pts) >= MIN_SEGMENT_MM {
+                out.push(pts.to_vec());
+            }
+            return out;
+        }
+        // Fast bounding-box check for the whole polyline.
+        let (rx0, ry0) = self.origin;
+        let (rx1, ry1) = (rx0 + self.nx as f64 * self.cell, ry0 + self.ny as f64 * self.cell);
+        let (mut lx0, mut ly0, mut lx1, mut ly1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(x, y) in pts {
+            lx0 = lx0.min(x);
+            ly0 = ly0.min(y);
+            lx1 = lx1.max(x);
+            ly1 = ly1.max(y);
+        }
+        if lx1 < rx0 || lx0 > rx1 || ly1 < ry0 || ly0 > ry1 {
+            // Entire polyline is outside the region's bounding box.
+            if invert && polyline_length(pts) >= MIN_SEGMENT_MM {
+                out.push(pts.to_vec());
+            }
             return out;
         }
         let lerp = |a: Pt, b: Pt, t: f64| match t {
@@ -685,7 +791,13 @@ impl Cutter {
         for w in pts.windows(2) {
             let (a, b) = (w[0], w[1]);
             ts.clear();
-            self.crossings(a, b, &mut ts);
+            let seg_outside_bbox = (a.0.max(b.0) < rx0)
+                || (a.0.min(b.0) > rx1)
+                || (a.1.max(b.1) < ry0)
+                || (a.1.min(b.1) > ry1);
+            if !seg_outside_bbox {
+                self.crossings(a, b, &mut ts);
+            }
             let recheck = touched_end || ts.iter().any(|&t| t <= 1e-12);
             touched_end = ts.iter().any(|&t| t >= 1.0 - 1e-12);
             ts.retain(|&t| t > 1e-12 && t < 1.0 - 1e-12);
@@ -693,7 +805,11 @@ impl Cutter {
             ts.dedup_by(|x, y| (*x - *y).abs() < 1e-12);
             if state.is_none() || recheck || !ts.is_empty() {
                 let end = ts.first().copied().unwrap_or(1.0);
-                state = Some(self.inside(lerp(a, b, end * 0.5)));
+                state = Some(if seg_outside_bbox {
+                    false
+                } else {
+                    self.inside(lerp(a, b, end * 0.5))
+                });
             }
             let mut t0 = 0.0;
             for k in 0..=ts.len() {
@@ -701,7 +817,7 @@ impl Cutter {
                 if k > 0 {
                     state = Some(self.inside(lerp(a, b, (t0 + t1) * 0.5)));
                 }
-                if state == Some(true) {
+                if state == Some(want) {
                     let p = lerp(a, b, t0);
                     if current.last().is_none_or(|&l| dist(l, p) > 1e-9) {
                         flush(&mut current, &mut out);

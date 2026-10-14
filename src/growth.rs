@@ -130,6 +130,7 @@ impl Grid {
 /// The growing network and the attractors it is growing towards.
 struct Tree {
     attractors: Vec<Pt>,
+    attractor_owner: Vec<usize>,
     alive: Vec<bool>,
     /// Each attractor's nearest node so far: nodes are never removed, so a
     /// new node only has to be compared with the attractors around it.
@@ -137,6 +138,7 @@ struct Tree {
     attractor_grid: Grid,
     at: Vec<Pt>,
     parent: Vec<usize>,
+    node_owner: Vec<usize>,
     /// Children per node: capped, so a root forks instead of fanning out.
     kids: Vec<u8>,
     node_grid: Grid,
@@ -146,7 +148,7 @@ struct Tree {
 }
 
 impl Tree {
-    fn new(attractors: Vec<Pt>, p: &GrowthParams) -> Tree {
+    fn new(attractors: Vec<Pt>, attractor_owner: Vec<usize>, p: &GrowthParams) -> Tree {
         let mut attractor_grid = Grid::new(p.reach.max(p.kill));
         for (i, &a) in attractors.iter().enumerate() {
             attractor_grid.insert(i, a);
@@ -156,9 +158,11 @@ impl Tree {
             alive: vec![true; attractors.len()],
             best: vec![(NONE, f64::MAX); attractors.len()],
             attractors,
+            attractor_owner,
             attractor_grid,
             at: Vec::new(),
             parent: Vec::new(),
+            node_owner: Vec::new(),
             kids: Vec::new(),
             node_grid: Grid::new(too_close),
             reach2: p.reach * p.reach,
@@ -167,18 +171,20 @@ impl Tree {
         }
     }
 
-    fn add(&mut self, q: Pt, from: usize) {
+    fn add(&mut self, q: Pt, from: usize, root_idx: usize) {
         let idx = self.at.len();
+        let owner = if from == NONE { root_idx } else { self.node_owner[from] };
         self.at.push(q);
         self.parent.push(from);
+        self.node_owner.push(owner);
         self.kids.push(0);
         if from != NONE {
             self.kids[from] += 1;
         }
         self.node_grid.insert(idx, q);
-        let Tree { attractors, alive, best, attractor_grid, reach2, kill2, .. } = self;
+        let Tree { attractors, attractor_owner, alive, best, attractor_grid, reach2, kill2, .. } = self;
         attractor_grid.near(q, |k| {
-            if !alive[k] {
+            if !alive[k] || attractor_owner[k] != owner {
                 return;
             }
             let d = d2(q, attractors[k]);
@@ -221,8 +227,8 @@ fn generate_roots(region: &Region, source: &RootSource, seed: u64, variation: f6
             let mut pts = if v > 0.0 {
                 // Uneven spacing: big trees need room, saplings crowd in.
                 let noise = crate::noise::Perlin::new(seed.wrapping_add(17));
-                let (lo, hi) = (d * (1.0 - 0.7 * v), d * (1.0 + 2.5 * v));
-                let patch = d * 4.0;
+                let (lo, hi) = (d * (1.0 - 0.65 * v), d * (1.0 + 1.8 * v));
+                let patch = d * 3.5;
                 poisson_disk_varying(region, lo, hi, |q| lo + (hi - lo) * (0.5 + 1.4 * noise.fbm(q.0 / patch, q.1 / patch, 2)).clamp(0.0, 1.0), seed)
             } else {
                 poisson_disk(region, d, seed)
@@ -253,70 +259,126 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
     if region.is_empty() || p.spacing <= 0.0 || p.step <= 0.0 || p.reach <= 0.0 || p.kill <= 0.0 {
         return empty();
     }
-    let roots = generate_roots(region, &p.roots, p.seed, p.variation);
+    let mut roots = generate_roots(region, &p.roots, p.seed, p.variation);
     if roots.is_empty() {
         return empty();
     }
+    let cov = p.coverage.clamp(0.0, 1.0);
+    // Thin generated roots with low-frequency patch noise (same woods-and-clearings
+    // scatter as `isoline-stack`) when `coverage < 1.0`.
+    if !matches!(p.roots, RootSource::At(_)) && cov < 1.0 && roots.len() > 1 {
+        let patches = crate::noise::Perlin::new(p.seed.wrapping_add(3));
+        let avg_nn = roots
+            .iter()
+            .map(|&r| roots.iter().filter(|&&o| o != r).map(|&o| d2(r, o)).fold(f64::MAX, f64::min).sqrt())
+            .sum::<f64>()
+            / roots.len() as f64;
+        let scale = (avg_nn * 3.5).max(1.0);
+        let threshold = 0.55 - 1.15 * cov;
+        let kept: Vec<Pt> = roots.iter().copied().filter(|c| patches.fbm(c.0 / scale, c.1 / scale, 3) > threshold).collect();
+        if !kept.is_empty() {
+            roots = kept;
+        }
+    }
     let mut footprint = region.clone();
     let mut attractors = poisson_disk(region, p.spacing, p.seed.wrapping_add(7));
+    // Track which root owns each attractor so basins never cross each other's
+    // crown-shyness seam.
+    let mut owner: Vec<usize> = vec![0; attractors.len()];
     if roots.len() > 1 {
-        // Each root owns a roughly round, wobbly cell: half the way to its
-        // nearest neighbour, scaled by coverage; attractors outside every
-        // cell are dropped, leaving gaps between the trees.
         let noise = crate::noise::Perlin::new(p.seed.wrapping_add(11));
         let mut rng = Rng::new(p.seed.wrapping_add(13));
         let v = p.variation.clamp(0.0, 1.0);
         let cells: Vec<(Pt, f64)> = roots
             .iter()
-            .enumerate()
-            .map(|(k, &r)| {
+            .map(|&r| {
                 let nn = roots.iter().filter(|&&o| o != r).map(|&o| d2(r, o)).fold(f64::MAX, f64::min).sqrt();
-                let base = nn * 0.6 * p.coverage.clamp(0.0, 1.0).sqrt();
-                // Per-tree size: radius and attractor spacing scale together.
+                let base = nn * (0.48 + 0.38 * cov.sqrt());
+                // Power-law size spread so saplings, medium crowns, and large
+                // dominant trees sit side by side.
                 let u = rng.range(0.0, 1.0);
-                let scale = if v > 0.0 { 1.0 + v * (u * 0.85 - 0.35) } else { 1.0 };
-                let c = (
-                    r.0 + v * 0.12 * base * noise.fbm(k as f64 * 2.1, 0.7, 1),
-                    r.1 + v * 0.12 * base * noise.fbm(0.3, k as f64 * 1.9, 1),
-                );
-                (c, base * scale)
+                let scale = if v > 0.0 { (1.0 - 0.55 * v) + v * 1.45 * u * u } else { 1.0 };
+                (r, base * scale)
             })
             .collect();
-        let wobble = |k: usize, a: f64| 1.0 + 0.35 * noise.fbm(k as f64 * 7.3 + a.cos() * 1.2, k as f64 * 3.1 + a.sin() * 1.2, 2);
-        let rings: Vec<Vec<Pt>> = cells
-            .iter()
-            .enumerate()
-            .map(|(k, &(c, radius))| {
-                (0..48)
-                    .map(|i| {
-                        let a = i as f64 / 48.0 * std::f64::consts::TAU;
-                        let r = radius * wobble(k, a);
-                        (c.0 + r * a.cos(), c.1 + r * a.sin())
-                    })
-                    .collect()
-            })
-            .collect();
-        footprint = rings
-            .iter()
-            .fold(Region::from_rings_even_odd(&[]), |u, ring| u.union(&Region::from_rings_even_odd(std::slice::from_ref(ring))))
-            .intersection(region);
-        attractors.retain(|&q| {
-            // Weighted by size: a big tree claims more of the gap.
-            let (k, _) = cells.iter().enumerate().fold((0, f64::MAX), |b, (i, c)| {
-                let d = d2(q, c.0) / (c.1 * c.1).max(1e-9);
-                if d < b.1 { (i, d) } else { b }
-            });
-            let (c, radius) = cells[k];
-            let a = (q.1 - c.1).atan2(q.0 - c.0);
-            d2(q, c) < (radius * wobble(k, a)).powi(2)
-        });
+        let wobble = |k: usize, a: f64| 1.0 + 0.32 * noise.fbm(k as f64 * 7.3 + a.cos() * 1.3, k as f64 * 3.1 + a.sin() * 1.3, 2);
+        // Shyness seam width in mm between competing Voronoi territories.
+        let seam = (p.spacing * (1.2 + 1.5 * (1.0 - cov))).max(p.step * 1.3);
+        let mut kept = Vec::with_capacity(attractors.len());
+        let mut kept_owner = Vec::with_capacity(attractors.len());
+        for q in attractors {
+            let mut best1 = (0usize, f64::MAX);
+            let mut best2 = (0usize, f64::MAX);
+            for (i, &(c, rad)) in cells.iter().enumerate() {
+                let a = (q.1 - c.1).atan2(q.0 - c.0);
+                let eff_r = (rad * wobble(i, a)).max(1e-6);
+                let nd = d2(q, c).sqrt() / eff_r;
+                if nd < best1.1 {
+                    best2 = best1;
+                    best1 = (i, nd);
+                } else if nd < best2.1 {
+                    best2 = (i, nd);
+                }
+            }
+            let (k, nd1) = best1;
+            let (c1, r1) = cells[k];
+            let (c2, r2) = cells[best2.0];
+            // Distance to the weighted bisector between the two closest basins:
+            let d1 = d2(q, c1).sqrt();
+            let d2_dist = d2(q, c2).sqrt();
+            let margin = (d2_dist * r1 - d1 * r2) / (r1 + r2).max(1e-6);
+            if (cov >= 0.98 || nd1 <= 1.0) && margin > seam * 0.5 {
+                kept.push(q);
+                kept_owner.push(k);
+            }
+        }
+        attractors = kept;
+        owner = kept_owner;
+
+        // Displace generated roots slightly off-centre inside their own basin so
+        // primary trunks sweep across the territory like organic leaf/coral fans,
+        // while staying within `reach * 0.6` of the cell centre so the whole cell
+        // is colonized.
+        if !matches!(p.roots, RootSource::At(_)) {
+            for (k, r) in roots.iter_mut().enumerate() {
+                let (_, rad) = cells[k];
+                let a = rng.range(0.0, std::f64::consts::TAU);
+                let shift = (rad * 0.25).min(p.reach * 0.55);
+                let candidate = (r.0 + shift * a.cos(), r.1 + shift * a.sin());
+                if region.covers_point(candidate) {
+                    *r = candidate;
+                }
+            }
+        }
+
+        if cov < 0.98 {
+            let rings: Vec<Vec<Pt>> = cells
+                .iter()
+                .enumerate()
+                .map(|(k, &(c, radius))| {
+                    (0..48)
+                        .map(|i| {
+                            let a = i as f64 / 48.0 * std::f64::consts::TAU;
+                            let r = radius * wobble(k, a);
+                            (c.0 + r * a.cos(), c.1 + r * a.sin())
+                        })
+                        .collect()
+                })
+                .collect();
+            footprint = rings
+                .iter()
+                .fold(Region::from_rings_even_odd(&[]), |u, ring| u.union(&Region::from_rings_even_odd(std::slice::from_ref(ring))))
+                .intersection(region);
+        }
     }
-    let mut tree = Tree::new(attractors, p);
-    for &r in &roots {
-        tree.add(r, NONE);
+    let mut tree = Tree::new(attractors, owner, p);
+    for (i, &r) in roots.iter().enumerate() {
+        tree.add(r, NONE, i);
     }
 
     let mut rng = Rng::new(p.seed.wrapping_add(31));
+    let curl = crate::noise::Perlin::new(p.seed.wrapping_add(43));
+    let curl_scale = (p.reach * 2.2).max(1.0);
     let mut live: Vec<usize> = (0..tree.attractors.len()).collect();
     let mut pull: Vec<(f64, f64)> = Vec::new();
     let mut pulled: Vec<usize> = Vec::new();
@@ -344,7 +406,7 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
         let mut stuck: Vec<usize> = Vec::new();
         let mut grew = false;
         for &n in &pulled {
-            let (sx, sy) = std::mem::take(&mut pull[n]);
+            let (mut sx, mut sy) = std::mem::take(&mut pull[n]);
             if tree.kids[n] >= MAX_KIDS {
                 continue;
             }
@@ -353,16 +415,33 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
                 stuck.push(n);
                 continue;
             }
-            let (mut dx, mut dy) = (sx / len, sy / len);
-            if p.jitter > 0.0 {
-                let (s, c) = (rng.range(-p.jitter, p.jitter) * std::f64::consts::FRAC_PI_4).sin_cos();
-                (dx, dy) = (dx * c - dy * s, dx * s + dy * c);
+            sx /= len;
+            sy /= len;
+            // Forward momentum along the parent's flow so bifurcations split at
+            // acute, sweeping botanical angles rather than 90° T-junctions.
+            let par = tree.parent[n];
+            if par != NONE {
+                let (px, py) = (tree.at[n].0 - tree.at[par].0, tree.at[n].1 - tree.at[par].1);
+                let pl = px.hypot(py);
+                if pl > 1e-9 {
+                    let (ux, uy) = (px / pl, py / pl);
+                    let w = if tree.kids[n] == 0 { 0.35 } else { 0.48 };
+                    sx = sx * (1.0 - w) + ux * w;
+                    sy = sy * (1.0 - w) + uy * w;
+                }
             }
+            let norm = sx.hypot(sy).max(1e-9);
+            let (mut dx, mut dy) = (sx / norm, sy / norm);
+            // Coherent organic wave plus stochastic jitter.
+            let wave = 0.22 * curl.fbm(tree.at[n].0 / curl_scale, tree.at[n].1 / curl_scale, 2);
+            let j = if p.jitter > 0.0 { rng.range(-p.jitter, p.jitter) * std::f64::consts::FRAC_PI_4 } else { 0.0 };
+            let (s, c) = (wave + j).sin_cos();
+            (dx, dy) = (dx * c - dy * s, dx * s + dy * c);
             let q = (tree.at[n].0 + p.step * dx, tree.at[n].1 + p.step * dy);
             if tree.crowded(q) {
                 stuck.push(n);
             } else {
-                tree.add(q, n);
+                tree.add(q, n, 0);
                 grew = true;
             }
         }
@@ -381,22 +460,44 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
         }
     }
 
-    let Tree { at, parent, .. } = tree;
+    let Tree { at, parent, node_owner, .. } = tree;
     let paths = branches(&parent);
     let leaves = leaf_counts(&parent);
+    // Scale trunk thickening to each basin's own size when a basin is small,
+    // so both large demo discs and compact map crowns develop bold dark trunks.
+    let mut root_max_leaves = vec![1u32; roots.len().max(1)];
+    for (i, &l) in leaves.iter().enumerate() {
+        let r = node_owner[i].min(root_max_leaves.len() - 1);
+        root_max_leaves[r] = root_max_leaves[r].max(l);
+    }
     let passes = |n: usize| -> usize {
-        if p.pen <= 0.0 || p.thicken <= 0.0 {
+        if p.pen <= 0.0 || p.thicken <= 0.0 || p.max_passes == 0 {
             return 0;
         }
-        ((leaves[n] as f64 / p.thicken).sqrt().floor() as usize).min(p.max_passes)
+        let r = node_owner[n].min(root_max_leaves.len() - 1);
+        let adaptive = (root_max_leaves[r] as f64 / ((p.max_passes as f64 + 0.5).powi(2))).max(2.5);
+        let eff_thicken = p.thicken.min(adaptive);
+        ((leaves[n] as f64 / eff_thicken).sqrt().floor() as usize).min(p.max_passes)
     };
     let mut strokes: Strokes = Vec::new();
     for (path, from_junction) in &paths {
-        let pts: Vec<Pt> = path.iter().map(|&n| at[n]).collect();
+        let mut pts: Vec<Pt> = path.iter().map(|&n| at[n]).collect();
         let mut side: Vec<usize> = path.iter().map(|&n| passes(n)).collect();
-        // A side branch starts on its parent's trunk; it is as thick as itself.
-        if *from_junction {
+        // A side branch starts on its parent's trunk; ease its first point
+        // along the parent's tangent so the fork merges like a smooth Y.
+        if *from_junction && pts.len() >= 3 {
             side[0] = side[1];
+            let p0 = path[0];
+            let par = parent[p0];
+            if par != NONE {
+                let (tx, ty) = (at[p0].0 - at[par].0, at[p0].1 - at[par].1);
+                let tl = tx.hypot(ty);
+                let bl = d2(pts[0], pts[1]).sqrt();
+                if tl > 1e-9 && bl > 1e-9 {
+                    let pull_p = (pts[0].0 + (tx / tl) * bl * 0.45, pts[0].1 + (ty / tl) * bl * 0.45);
+                    pts[1] = (pts[1].0 * 0.65 + pull_p.0 * 0.35, pts[1].1 * 0.65 + pull_p.1 * 0.35);
+                }
+            }
         }
         strokes.push(chaikin(&pts, p.smooth));
         for j in 1..=p.max_passes {
@@ -410,9 +511,9 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
                         let (a, b) = (pts[k.saturating_sub(1)], pts[(k + 1).min(pts.len() - 1)]);
                         let (tx, ty) = (b.0 - a.0, b.1 - a.1);
                         let tl = tx.hypot(ty).max(1e-9);
-                        // Fold the pass into the centre over its last few nodes.
-                        let taper = ((m - 1 - k) as f64 / 3.0).min(1.0);
-                        let o = sign * j as f64 * p.pen * taper;
+                        // Smoothly taper the offset pass into the parent vein over its last 5 nodes.
+                        let taper = ((m - 1 - k) as f64 / 5.0).min(1.0);
+                        let o = sign * j as f64 * p.pen * 0.75 * taper;
                         (pts[k].0 - ty / tl * o, pts[k].1 + tx / tl * o)
                     })
                     .collect();
