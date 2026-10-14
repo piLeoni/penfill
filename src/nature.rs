@@ -1,7 +1,9 @@
 //! Nature-plan vector textures: pebbles, sparse sprouts, lily pads, tree
 //! canopies — the kind of fills used on site plans and illustration libraries.
 
+use crate::anchor::{centre, Anchor, Frame};
 use crate::concentric::signed_area;
+use crate::fray::{fray_strokes, whole_at};
 use crate::geo::{polyline_length, Pt, Region, Strokes};
 use crate::noise::Perlin;
 use crate::random::{poisson_disk, Rng};
@@ -275,6 +277,299 @@ pub fn fill_canopy(region: &Region, spacing: f64, seed: u64) -> Strokes {
             push_closed(region, &mut out, &dot(*c, dot_r));
         }
     }
+    out
+}
+
+/// Clustered columns of short curved grass/sedge blades and 2-blade V-tufts
+/// whose lean varies smoothly across patches via Perlin noise.
+pub fn fill_tufts(region: &Region, spacing: f64, angle: f64, seed: u64) -> Strokes {
+    fill_tufts_frayed(region, spacing, angle, seed, 0.0)
+}
+
+/// [`fill_tufts`] with optional perimeter-aware edge fraying (`fray` in mm).
+pub fn fill_tufts_frayed(region: &Region, spacing: f64, angle: f64, seed: u64, fray: f64) -> Strokes {
+    if spacing <= 0.0 || region.is_empty() {
+        return vec![];
+    }
+    let frame = Frame::anchored(Anchor::LOCAL, centre(region), angle);
+    let lean_noise = Perlin::new(seed);
+    let lane_noise = Perlin::new(seed.wrapping_add(13));
+    let fray_noise = Perlin::new(seed.wrapping_add(503));
+    let mut rng = Rng::new(seed.wrapping_add(37));
+
+    let col_w = spacing * 0.68;
+    let row_h = spacing * 0.72;
+    let pad = spacing * 1.5;
+    let (u_min, u_max, v_min, v_max) = frame.span(region, pad);
+    let i0 = (u_min / col_w).floor() as i64;
+    let i1 = (u_max / col_w).ceil() as i64;
+    let j0 = (v_min / row_h).floor() as i64;
+    let j1 = (v_max / row_h).ceil() as i64;
+
+    let mut out: Strokes = Vec::new();
+    let blade = |base: Pt, len: f64, dir: f64, bend: f64, frame: &Frame| -> Vec<Pt> {
+        let (s1, c1) = dir.sin_cos();
+        let (s2, c2) = (dir + bend).sin_cos();
+        let p0 = frame.world(base);
+        let p1 = frame.world((base.0 + 0.52 * len * s1, base.1 + 0.52 * len * c1));
+        let p2 = frame.world((
+            base.0 + 0.52 * len * s1 + 0.48 * len * s2,
+            base.1 + 0.52 * len * c1 + 0.48 * len * c2,
+        ));
+        vec![p0, p1, p2]
+    };
+
+    for i in i0..=i1 {
+        let col_u = i as f64 * col_w;
+        for j in j0..=j1 {
+            let stagger = if i.rem_euclid(2) == 1 { row_h * 0.48 } else { 0.0 };
+            let v0 = j as f64 * row_h + stagger;
+            let col_wave = lane_noise.noise(col_u / (spacing * 2.8), v0 / (spacing * 6.5));
+            let u = col_u + rng.range(-0.28, 0.28) * col_w + col_wave * spacing * 0.16;
+            let v = v0 + rng.range(-0.24, 0.24) * row_h;
+
+            // Vertical band modulation so columns group into 3–4 stroke wide ribbons
+            // separated by subtle open vertical lanes, like Image 2.
+            let band_phase = std::f64::consts::TAU * u / (spacing * 3.8)
+                + 0.7 * lane_noise.noise(u / (spacing * 4.0), v / (spacing * 5.0));
+            if band_phase.cos() < -0.42 {
+                continue;
+            }
+            let p_world = frame.world((u, v));
+            if !region.covers_point(p_world) {
+                continue;
+            }
+            let scale = if fray > 0.0 {
+                let w = whole_at(region, p_world, spacing, fray, &fray_noise);
+                if w < rng.range(0.08, 0.42) {
+                    continue;
+                }
+                0.28 + 0.72 * w
+            } else {
+                1.0
+            };
+
+            let lean = lean_noise.fbm(u / (spacing * 3.4), v / (spacing * 3.4), 2) * 0.72
+                + rng.range(-0.14, 0.14);
+            let h = spacing * rng.range(0.46, 0.74) * scale;
+            let bend = rng.range(0.14, 0.34) * if rng.unit() < 0.5 { 1.0 } else { -1.0 };
+
+            if rng.unit() < 0.32 {
+                // Two-blade V-tuft
+                let splay = rng.range(0.24, 0.42);
+                let b1 = blade((u, v), h * rng.range(0.85, 1.05), lean - splay, -bend.abs() * 0.7, &frame);
+                let b2 = blade(
+                    (u + rng.range(0.0, 0.06) * spacing, v),
+                    h * rng.range(0.80, 1.05),
+                    lean + splay,
+                    bend.abs() * 0.85,
+                    &frame,
+                );
+                out.extend(region.clip_polyline(&b1));
+                out.extend(region.clip_polyline(&b2));
+            } else {
+                let b = blade((u, v), h, lean, bend, &frame);
+                out.extend(region.clip_polyline(&b));
+            }
+        }
+    }
+    out
+}
+
+/// Scattered branched twigs: Poisson-sampled stick motifs with a 3–4 segment
+/// slightly kinked spine and 2–4 straight side shoots at acute angles.
+pub fn fill_twigs(region: &Region, spacing: f64, seed: u64) -> Strokes {
+    fill_twigs_frayed(region, spacing, seed, 0.0)
+}
+
+/// [`fill_twigs`] with optional perimeter-aware edge fraying (`fray` in mm).
+pub fn fill_twigs_frayed(region: &Region, spacing: f64, seed: u64, fray: f64) -> Strokes {
+    if spacing <= 0.0 || region.is_empty() {
+        return vec![];
+    }
+    let field = region.outset(spacing * 0.6);
+    let fray_noise = Perlin::new(seed.wrapping_add(607));
+    let mut rng = Rng::new(seed.wrapping_add(73));
+    let mut raw: Strokes = Vec::new();
+
+    for c in poisson_disk(&field, spacing * 1.18, seed) {
+        if !region.covers_point(c) {
+            continue;
+        }
+        let w = if fray > 0.0 {
+            let w = whole_at(region, c, spacing, fray, &fray_noise);
+            if w < rng.range(0.10, 0.38) {
+                continue;
+            }
+            0.35 + 0.65 * w
+        } else {
+            1.0
+        };
+
+        let n_segs = 3 + (rng.next_u64() % 2) as usize;
+        let seg_len = spacing * rng.range(0.38, 0.54) * w;
+        let mut dir = rng.range(0.0, std::f64::consts::TAU);
+
+        // Build kinked spine centred near `c`.
+        let (ca0, sa0) = dir.cos_sin();
+        let half_span = 0.5 * n_segs as f64 * seg_len;
+        let mut spine = Vec::with_capacity(n_segs + 1);
+        let mut cur = (c.0 - ca0 * half_span, c.1 - sa0 * half_span);
+        spine.push(cur);
+
+        let mut seg_dirs = Vec::with_capacity(n_segs);
+        for s in 0..n_segs {
+            if s > 0 {
+                dir += rng.range(-0.34, 0.34);
+            }
+            seg_dirs.push(dir);
+            let sl = seg_len * rng.range(0.82, 1.18);
+            let (ca, sa) = dir.cos_sin();
+            cur = (cur.0 + ca * sl, cur.1 + sa * sl);
+            spine.push(cur);
+        }
+        raw.push(spine.clone());
+
+        // Sprout straight or 2-segment side shoots from internal joints.
+        let mut side_sign = if rng.unit() < 0.5 { 1.0 } else { -1.0 };
+        for j in 1..n_segs {
+            let joint = spine[j];
+            let base_dir = 0.5 * (seg_dirs[j - 1] + seg_dirs[j]);
+            let both_sides = rng.unit() < 0.38;
+            let count = if both_sides { 2 } else { 1 };
+            for b in 0..count {
+                let sign = if b == 0 { side_sign } else { -side_sign };
+                let branch_ang = base_dir + sign * rng.range(0.52, 0.92);
+                let blen = spacing * rng.range(0.30, 0.58) * w;
+                let (bca, bsa) = branch_ang.cos_sin();
+                let p1 = (joint.0 + bca * blen, joint.1 + bsa * blen);
+                if rng.unit() < 0.28 {
+                    let ang2 = branch_ang + sign * rng.range(0.20, 0.42);
+                    let blen2 = blen * rng.range(0.42, 0.65);
+                    let (ca2, sa2) = ang2.cos_sin();
+                    let p2 = (p1.0 + ca2 * blen2, p1.1 + sa2 * blen2);
+                    raw.push(vec![joint, p1, p2]);
+                } else {
+                    raw.push(vec![joint, p1]);
+                }
+            }
+            side_sign = -side_sign;
+        }
+    }
+
+    if fray > 0.0 {
+        fray_strokes(region, raw, spacing, fray, seed)
+    } else {
+        region.clip_strokes(&raw)
+    }
+}
+
+trait CosSin {
+    fn cos_sin(self) -> (f64, f64);
+}
+impl CosSin for f64 {
+    #[inline]
+    fn cos_sin(self) -> (f64, f64) {
+        let (s, c) = self.sin_cos();
+        (c, s)
+    }
+}
+
+/// Parallel meandering stems running along `angle` (`spacing` mm apart) with
+/// short straight side-shoots sprouting at acute angles on alternating sides.
+pub fn fill_vines(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: Anchor) -> Strokes {
+    fill_vines_frayed(region, spacing, angle, seed, anchor, 0.0)
+}
+
+/// [`fill_vines`] with optional perimeter-aware edge fraying (`fray` in mm).
+pub fn fill_vines_frayed(
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    seed: u64,
+    anchor: Anchor,
+    fray: f64,
+) -> Strokes {
+    if spacing <= 0.0 || region.is_empty() {
+        return vec![];
+    }
+    let frame = Frame::anchored(anchor, centre(region), angle);
+    let noise = Perlin::new(seed);
+    let fray_noise = Perlin::new(seed.wrapping_add(709));
+
+    let pad = spacing * 2.0;
+    let (u_min, u_max, v_min, v_max) = frame.span(region, pad);
+    let k0 = (v_min / spacing).floor() as i64;
+    let k1 = (v_max / spacing).ceil() as i64;
+    let step = (spacing * 0.18).clamp(0.10, 0.4);
+
+    let mut stem_strokes: Strokes = Vec::new();
+    let mut barb_strokes: Strokes = Vec::new();
+
+    for k in k0..=k1 {
+        let v0 = k as f64 * spacing;
+        let mut vrng = Rng::new(seed ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let phase = vrng.range(0.0, std::f64::consts::TAU);
+        let wave_len = spacing * 2.55;
+        let amp = spacing * 0.16;
+
+        let stem_v = |u: f64| -> f64 {
+            let w1 = (std::f64::consts::TAU * u / wave_len + phase).sin();
+            let w2 = noise.fbm(u / (spacing * 2.4), k as f64 * 0.67 + 1.9, 2);
+            v0 + amp * (0.65 * w1 + 0.85 * w2)
+        };
+
+        let mut stem = Vec::new();
+        let mut u = u_min;
+        while u <= u_max {
+            stem.push(frame.world((u, stem_v(u))));
+            u += step;
+        }
+        stem_strokes.push(stem);
+
+        // Sprout alternating side barbs along the stem.
+        let barb_pitch = spacing * 0.54;
+        let mut bu = u_min + vrng.range(0.1, 0.9) * barb_pitch;
+        let mut side = if k.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+        while bu <= u_max - step {
+            let jitter_u = bu + vrng.range(-0.10, 0.10) * barb_pitch;
+            let v_here = stem_v(jitter_u);
+            let p_base = frame.world((jitter_u, v_here));
+
+            let barb_scale = if fray > 0.0 {
+                let w = whole_at(region, p_base, spacing, fray, &fray_noise);
+                if w < vrng.range(0.22, 0.48) {
+                    side = -side;
+                    bu += barb_pitch * vrng.range(0.85, 1.20);
+                    continue;
+                }
+                0.35 + 0.65 * w
+            } else {
+                1.0
+            };
+
+            // Local tangent of stem in (u, v)
+            let dv = stem_v(jitter_u + step * 0.5) - stem_v(jitter_u - step * 0.5);
+            let stem_ang = dv.atan2(step);
+            let barb_ang = stem_ang + side * vrng.range(0.58, 0.78);
+            let barb_len = spacing * vrng.range(0.38, 0.50) * barb_scale;
+            let p_tip = frame.world((
+                jitter_u + barb_len * barb_ang.cos(),
+                v_here + barb_len * barb_ang.sin(),
+            ));
+            barb_strokes.push(vec![p_base, p_tip]);
+
+            side = -side;
+            bu += barb_pitch * vrng.range(0.86, 1.16);
+        }
+    }
+
+    let mut out = if fray > 0.0 {
+        fray_strokes(region, stem_strokes, spacing, fray, seed)
+    } else {
+        region.clip_strokes(&stem_strokes)
+    };
+    out.extend(region.clip_strokes(&barb_strokes));
     out
 }
 

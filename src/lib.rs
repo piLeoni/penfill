@@ -13,6 +13,7 @@ pub mod concentric;
 pub mod dither;
 pub mod dotswaves;
 pub mod field;
+pub mod fray;
 pub mod geo;
 pub mod grass;
 pub mod growth;

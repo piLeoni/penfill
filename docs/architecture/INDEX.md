@@ -7,7 +7,7 @@ source files. Source code is authoritative.
 | Subsystem | Doc | Primary sources |
 | --- | --- | --- |
 | Geometry kernel | [geometry.md](geometry.md) | `src/geo.rs`, `src/sweep.rs`, `src/grid.rs` |
-| Fills | [fills.md](fills.md) | `src/zigzag.rs`, `src/spiral.rs`, `src/concentric.rs`, `src/rectilinear.rs`, `src/tile.rs`, `src/litho.rs`, `src/nature.rs`, `src/textures.rs`, `src/growth.rs`, and the remaining `src/*.rs` fill modules |
+| Fills | [fills.md](fills.md) | `src/zigzag.rs`, `src/spiral.rs`, `src/concentric.rs`, `src/rectilinear.rs`, `src/tile.rs`, `src/litho.rs`, `src/nature.rs`, `src/textures.rs`, `src/growth.rs`, `src/fray.rs`, and the remaining `src/*.rs` fill modules |
 | Isoline blob fills | [isoline-blob-fills.md](isoline-blob-fills.md) | `src/isoline_blobs.rs`, `src/isoline_stack.rs`, `src/field.rs`, `src/noise.rs` |
 | Placement | [placement.md](placement.md) | `src/anchor.rs`, `src/placement.rs` |
 | Primitives | [primitives.md](primitives.md) | `src/random.rs`, `src/noise.rs`, `src/field.rs` |

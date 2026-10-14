@@ -43,7 +43,7 @@ Regular cells placed on an anchored `Frame`.
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `dotswaves.rs` | `fill_dots`, `fill_dots_with_lattice`, `fill_waves`, `fill_wave_grid` | `Lattice::{Square, Hexagonal}`; `STEP = 0.1` wave march |
+| `dotswaves.rs` | `fill_dots`, `fill_dots_with_lattice`, `fill_waves`, `fill_waves_frayed`, `fill_wave_grid`, `fill_wave_grid_frayed` | `Lattice::{Square, Hexagonal}`; `STEP = 0.1` wave march; optional perimeter-aware `fray` |
 | `scales.rs` | `fill_scales` | rows of half-circles, one continuous scalloped line per row (`ARC_STEPS = 12`) |
 | `truchet.rs` | `fill_truchet` | two quarter arcs per cell, random orientation (`ARC_STEPS = 8`); arcs meet at cell-edge midpoints to chain into long paths |
 | `grass.rs` | `fill_grass` | tile of 4×4 tufts, hand-drawn look, repeats exactly like a `.pat` |
@@ -59,7 +59,7 @@ Poisson-disk / Voronoi based. Take no anchor.
 | `gravel.rs` | `fill_gravel`, `fill_gravel_with` | Voronoi stones, gaps and rounded corners; `GravelEdge::{Adaptive, Clipped}` at the wall |
 | `terrazzo.rs` | `fill_terrazzo` | chips of many sizes, ~⅓ dark (hatched, never solid) |
 | `scribble.rs` | `fill_scribble` | two layers (2nd turned ~70–110°), per-line tilt/spacing error, broken into strokes — hand hatching |
-| `nature.rs` | `fill_pebbles`, `fill_leaves`, `fill_sprouts`, `fill_lily_pads`, `fill_canopy`, `fill_fluid_grass` | site-plan vector textures; `fill_leaves` delegates to `fill_sprouts` |
+| `nature.rs` | `fill_pebbles`, `fill_leaves`, `fill_sprouts`, `fill_lily_pads`, `fill_canopy`, `fill_fluid_grass`, `fill_tufts(_frayed)`, `fill_twigs(_frayed)`, `fill_vines(_frayed)` | site-plan vector textures; `fill_leaves` delegates to `fill_sprouts` |
 
 ## Branching (space colonization)
 
@@ -100,11 +100,12 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 | `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage` | flat: contours of one 2D noise field; returns mask `coverage` — see [isoline-blob-fills.md](isoline-blob-fills.md) |
 | `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage` | 3D: crowns of metaball spheres cut into slices, upper slices hide lower ones (overhang); `EdgeMode::{Clip, Inside, Overflow(mm)}` |
 
-## Texture (built on `field.rs`)
+## Texture (built on `field.rs` and flow/Voronoi)
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `textures.rs` | `fill_marble`, `fill_wood`, `fill_cracks` | contour lines of a noise-driven field |
+| `textures.rs` | `fill_marble`, `fill_wood`, `fill_cracks`, `fill_cell_net(_frayed)`, `fill_eddies(_frayed)`, `fill_ripples(_frayed)`, `fill_swells(_frayed)` | contour lines, flow streamlines, overlapping swells, and cellular nets |
+| `fray.rs` | `whole_at`, `fray_strokes` | perimeter-aware edge fraying: survival weight from `Region::dist_to_boundary` + Perlin wobble breaks strokes into progressively shorter dashes/dots before the boundary |
 
 - Marble: veins at `angle`, domain-warped twice (slow drift + folded ripple),
   each vein drawn as its two edges so it pinches and swells. Sampled finer
@@ -112,6 +113,10 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 - Wood: long lines along `angle` with knots (~1 per 900 mm²) the grain flows
   around; knot radius is relative to the board, not the line spacing.
 - Cracks: rounded Voronoi cells with wide gaps — cellular dry-earth tile.
+- Cell net: single-wall Voronoi network where shared edges are drawn once with 1–2 organic kinks and exact 3-way junctions.
+- Eddies: continuous 2D vector field of undulating wave streamlines and Archimedean spiral vortices placed via Jobard-Lefer seeding so streamlines hug the spirals with no empty gaps.
+- Ripples: staggered rows of medium-length wave strokes driven by a shared 2D swell field.
+- Swells: overlapping wave hills / dunes rendered foreground-to-background with a 1D horizon occlusion buffer and internal ribs that fan across each swell's slope.
 
 ## Geological (`litho.rs`, large)
 

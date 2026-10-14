@@ -140,6 +140,48 @@ pub fn fill_waves_into(region: &Region, interval: f64, angle: f64, anchor: Ancho
     }
 }
 
+/// [`fill_waves`] with optional perimeter-aware edge fraying (`fray` in mm):
+/// wave amplitude eases down near the boundary and lines break into progressively
+/// shorter dashes and dots before disappearing.
+pub fn fill_waves_frayed(
+    region: &Region,
+    interval: f64,
+    angle: f64,
+    anchor: Anchor,
+    fray: f64,
+    seed: u64,
+) -> Strokes {
+    if fray <= 0.0 {
+        return fill_waves(region, interval, angle, anchor);
+    }
+    if interval <= 0.0 || region.is_empty() {
+        return vec![];
+    }
+    let frame = Frame::anchored(anchor, centre(region), angle);
+    let wavelength = interval / 4.0;
+    let frequency_scale = std::f64::consts::PI / wavelength / 8.0;
+    let fray_noise = crate::noise::Perlin::new(seed.wrapping_add(811));
+
+    let (u0, u1, v0, v1) = frame.span(region, interval);
+    let samples = indices(u0, u1, STEP);
+    let mut raw = Vec::new();
+    for k in indices(v0, v1, interval) {
+        let v = k as f64 * interval;
+        let coords: Vec<(f64, f64)> = samples
+            .clone()
+            .map(|m| {
+                let u = m as f64 * STEP;
+                let p_base = frame.world((u, v));
+                let w = crate::fray::whole_at(region, p_base, interval, fray, &fray_noise);
+                let amp_scale = 0.25 + 0.75 * w;
+                frame.world((u, v + (u * frequency_scale).sin() * wavelength * amp_scale))
+            })
+            .collect();
+        raw.push(coords);
+    }
+    crate::fray::fray_strokes(region, raw, interval, fray, seed)
+}
+
 /// Ogee, the curved-diamond wallpaper lattice: two sets of waves running
 /// the same way at `angle`, one the mirror of the other. Rows are
 /// `spacing` mm apart and each wave swings half a row, so the crest of one
@@ -152,6 +194,23 @@ pub fn fill_wave_grid(region: &Region, spacing: f64, angle: f64, anchor: Anchor)
     let mut out = crate::field::fill_profile(region, spacing, angle, anchor, |x| amp * (k * x).sin());
     out.extend(crate::field::fill_profile(region, spacing, angle, anchor, |x| -amp * (k * x).sin()));
     out
+}
+
+/// [`fill_wave_grid`] with optional perimeter-aware edge fraying (`fray` in mm).
+pub fn fill_wave_grid_frayed(
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    anchor: Anchor,
+    fray: f64,
+    seed: u64,
+) -> Strokes {
+    let strokes = fill_wave_grid(region, spacing, angle, anchor);
+    if fray > 0.0 {
+        crate::fray::fray_strokes(region, strokes, spacing, fray, seed)
+    } else {
+        strokes
+    }
 }
 
 /// Keep only sub-strokes whose points are (mostly) inside the region; a
