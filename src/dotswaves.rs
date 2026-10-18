@@ -140,46 +140,87 @@ pub fn fill_waves_into(region: &Region, interval: f64, angle: f64, anchor: Ancho
     }
 }
 
+/// Standardized entry point for `dots` with [`FillParams`], `mark`, and [`Lattice`].
+pub fn fill_dots_params(
+    region: &Region,
+    params: &crate::pattern::FillParams,
+    mark: Option<f64>,
+    lattice: Lattice,
+) -> crate::pattern::FillOutput {
+    let spacing = params.spacing;
+    if spacing <= 0.0 || region.is_empty() {
+        return crate::pattern::FillOutput::default();
+    }
+    let mark_mm = mark.unwrap_or(spacing * 0.2);
+    crate::pattern::fill_pattern_output(region, params, |c, t| {
+        t.set_mask_halo(spacing * 0.55);
+        fill_dots_with_lattice(&c.limit, spacing, c.angle, mark_mm, lattice, c.anchor)
+    })
+}
+
 /// [`fill_waves`] with optional perimeter-aware edge fraying (`fray` in mm):
 /// wave amplitude eases down near the boundary and lines break into progressively
 /// shorter dashes and dots before disappearing.
 pub fn fill_waves_frayed(
     region: &Region,
-    interval: f64,
+    spacing: f64,
     angle: f64,
     anchor: Anchor,
     fray: f64,
     seed: u64,
 ) -> Strokes {
-    if fray <= 0.0 {
-        return fill_waves(region, interval, angle, anchor);
-    }
-    if interval <= 0.0 || region.is_empty() {
-        return vec![];
-    }
-    let frame = Frame::anchored(anchor, centre(region), angle);
-    let wavelength = interval / 4.0;
-    let frequency_scale = std::f64::consts::PI / wavelength / 8.0;
-    let fray_noise = crate::noise::Perlin::new(seed.wrapping_add(811));
+    fill_waves_params(
+        region,
+        &crate::pattern::FillParams::new(spacing)
+            .angle(angle)
+            .anchor(anchor)
+            .fray(fray)
+            .seed(seed),
+    )
+    .strokes
+}
 
-    let (u0, u1, v0, v1) = frame.span(region, interval);
-    let samples = indices(u0, u1, STEP);
-    let mut raw = Vec::new();
-    for k in indices(v0, v1, interval) {
-        let v = k as f64 * interval;
-        let coords: Vec<(f64, f64)> = samples
-            .clone()
-            .map(|m| {
-                let u = m as f64 * STEP;
-                let p_base = frame.world((u, v));
-                let w = crate::fray::whole_at(region, p_base, interval, fray, &fray_noise);
-                let amp_scale = 0.25 + 0.75 * w;
-                frame.world((u, v + (u * frequency_scale).sin() * wavelength * amp_scale))
-            })
-            .collect();
-        raw.push(coords);
+/// Standardized entry point for `waves` with [`FillParams`].
+pub fn fill_waves_params(
+    region: &Region,
+    params: &crate::pattern::FillParams,
+) -> crate::pattern::FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return crate::pattern::FillOutput::default();
     }
-    crate::fray::fray_strokes(region, raw, interval, fray, seed)
+    if params.fray <= 0.0 {
+        let target = params.resolve_region(region, 0.0);
+        let limit = params.resolve_limit(&target);
+        let strokes = fill_waves(&limit, params.spacing, params.angle, params.anchor);
+        return crate::pattern::FillOutput {
+            strokes,
+            mask: limit,
+        };
+    }
+    crate::pattern::fill_pattern_output(region, params, |c, t| {
+        let spacing = c.spacing;
+        let frame = t.frame(c.angle);
+        let wavelength = spacing / 4.0;
+        let frequency_scale = std::f64::consts::PI / wavelength / 8.0;
+        let (u0, u1, v0, v1) = frame.span(&c.limit, spacing);
+        let samples = indices(u0, u1, STEP);
+        let mut raw = Vec::new();
+        for k in indices(v0, v1, spacing) {
+            let v = k as f64 * spacing;
+            let coords: Vec<(f64, f64)> = samples
+                .clone()
+                .map(|m| {
+                    let u = m as f64 * STEP;
+                    let p_base = frame.world((u, v));
+                    let w = t.whole_at(p_base);
+                    let amp_scale = 0.25 + 0.75 * w;
+                    frame.world((u, v + (u * frequency_scale).sin() * wavelength * amp_scale))
+                })
+                .collect();
+            raw.push(coords);
+        }
+        raw
+    })
 }
 
 /// Ogee, the curved-diamond wallpaper lattice: two sets of waves running
@@ -189,7 +230,6 @@ pub fn fill_waves_frayed(
 /// diamonds.
 pub fn fill_wave_grid(region: &Region, spacing: f64, angle: f64, anchor: Anchor) -> Strokes {
     let amp = spacing * 0.5;
-    // Cells 1.8 rows long: shorter reads as a wavy grid, not domes.
     let k = std::f64::consts::PI / (spacing * 1.8);
     let mut out = crate::field::fill_profile(region, spacing, angle, anchor, |x| amp * (k * x).sin());
     out.extend(crate::field::fill_profile(region, spacing, angle, anchor, |x| -amp * (k * x).sin()));
@@ -205,12 +245,33 @@ pub fn fill_wave_grid_frayed(
     fray: f64,
     seed: u64,
 ) -> Strokes {
-    let strokes = fill_wave_grid(region, spacing, angle, anchor);
-    if fray > 0.0 {
-        crate::fray::fray_strokes(region, strokes, spacing, fray, seed)
-    } else {
-        strokes
+    fill_wave_grid_params(
+        region,
+        &crate::pattern::FillParams::new(spacing)
+            .angle(angle)
+            .anchor(anchor)
+            .fray(fray)
+            .seed(seed),
+    )
+    .strokes
+}
+
+/// Standardized entry point for `wave_grid` with [`FillParams`].
+pub fn fill_wave_grid_params(
+    region: &Region,
+    params: &crate::pattern::FillParams,
+) -> crate::pattern::FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return crate::pattern::FillOutput::default();
     }
+    crate::pattern::fill_pattern_output(region, params, |c, t| {
+        let amp = c.spacing * 0.5;
+        let k = std::f64::consts::PI / (c.spacing * 1.8);
+        let t_lim = t.on(&c.limit);
+        let mut out = t_lim.profile(c.spacing, c.angle, |x| amp * (k * x).sin());
+        out.extend(t_lim.profile(c.spacing, c.angle, |x| -amp * (k * x).sin()));
+        out
+    })
 }
 
 /// Keep only sub-strokes whose points are (mostly) inside the region; a

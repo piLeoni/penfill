@@ -2,19 +2,11 @@
 
 ![Zigzag on four shapes. Each colour is one pen-down; the labels compare the stroke count with plain hatching](docs/img/hero.svg)
 
-**Fills and hatches for pen plotters, for Python and Node — and an extensible
-engine.** Give penfill a shape in millimetres and it returns the lines a pen
-should draw to fill it: serpentine zigzags that barely lift the pen (each
-colour above is one pen-down), spirals, lattices, stipple, gravel, grass,
-marble, AutoCAD `.pat` hatches, dithered photos, and patterns you build
-yourself. Every line stays inside the shape and goes around its holes.
+**Infill, hatching, and generative texture engine for pen plotters, CNC toolpaths, and laser engravers — in Rust, Python, Node.js, and WebAssembly.**
 
-Zigzag, stipple, dither and the rest are not a closed list. They are built
-with the same architecture you get from [`pattern`](#build-your-own-pattern):
-a **canvas** (the shape, its bounds, the seed), an optional **tools**
-kit (noise, scatter, hatch — what the built-ins use), you return strokes
-anywhere on the page, and the engine clips them to the outline. Add a fill
-that behaves like a built-in one, or ignore the toolkit and use your own code.
+Give `penfill` a polygon region in millimetres and it returns the open polylines (`Strokes`) a pen should draw to fill it: boustrophedon zigzags that barely lift the pen, offset rings and spirals, geometric lattices, Poisson-disk stippling, Voronoi gravel and mud cracks, Jobard–Lefer flow streamlines, overlapping wave swells, metaball contour stacks, differential growth, 50+ cartographic geology and soil symbols, AutoCAD `.pat` hatches, dithered images, and custom patterns you write yourself.
+
+Every built-in pattern is authored on the exact same [`Canvas` + `Tools` standard library](#build-your-own-pattern) exposed to your own code — and every pattern supports universal **perimeter edge fraying (`fray`)**, **boundary modes (`edge`: `Clip`, `Inside`, `Overflow`)**, and **polygon knockout masks (`FillOutput { strokes, mask }`)** for multi-layer compositions.
 
 ## Install
 
@@ -24,9 +16,7 @@ npm install penfill       # Node ≥ 18, TypeScript types included
 cargo add penfill         # Rust
 ```
 
-The engine is written in Rust. Python and Node get prebuilt binaries for
-Linux, macOS and Windows, so there's nothing to compile, and the three
-languages produce exactly the same lines.
+The core engine is pure Rust (`i_overlay` boolean geometry, custom `SplitMix64` RNG, and Perlin/simplex noise with zero platform drift). Python, Node, and Rust produce bit-identical strokes for the same seed.
 
 ## Quick start
 
@@ -35,522 +25,479 @@ languages produce exactly the same lines.
 ```python
 import penfill
 
-square = [(0, 0), (80, 0), (80, 60), (0, 60)]
-hole = [(30, 20), (50, 20), (50, 40), (30, 40)]
-shape = penfill.Region(square, holes=[hole])
+outer = [(0, 0), (80, 0), (80, 60), (0, 60)]
+hole  = [(30, 20), (50, 20), (50, 40), (30, 40)]
+shape = penfill.Region(outer, holes=[hole])
 
-strokes = penfill.zigzag(shape, 1.0, angle=45)   # polylines, in drawing order
-open("zigzag.svg", "w").write(penfill.to_svg(strokes, outline=shape))
+# Classic serpentine infill
+strokes = penfill.zigzag(shape, 1.2, angle=45)
+
+# Any pattern with smooth border fraying (dissolves over 8 mm near the wall)
+frayed = penfill.waves(shape, 1.5, angle=20, fray=8.0, seed=7)
+
+# Multi-layer knockout: foreground canopy masks out background hatching
+fg = penfill.canopy(shape, 6.0, seed=7, edge=("overflow", 3.0), with_mask=True)
+bg = penfill.rectilinear(shape.difference(fg.mask.outset(0.4)), 1.2, angle=35)
+
+open("plot.svg", "w").write(penfill.to_svg(fg.strokes + bg, outline=shape))
 ```
 
-**Node**
+**Node.js**
 
 ```js
-import { Region, zigzag, toSvg } from 'penfill'
+import { Region, zigzag, waves, canopy, rectilinear, toSvg } from 'penfill'
 import { writeFileSync } from 'node:fs'
 
-const square = [[0, 0], [80, 0], [80, 60], [0, 60]]
-const hole = [[30, 20], [50, 20], [50, 40], [30, 40]]
-const shape = new Region(square, [hole])
+const shape = new Region(
+  [[0, 0], [80, 0], [80, 60], [0, 60]],
+  [[[30, 20], [50, 20], [50, 40], [30, 40]]],
+)
 
-const strokes = zigzag(shape, 1.0, { angle: 45 })  // polylines, in drawing order
-writeFileSync('zigzag.svg', toSvg(strokes, shape))
+const strokes = zigzag(shape, 1.2, { angle: 45 })
+const frayed  = waves(shape, 1.5, { angle: 20, fray: 8.0, seed: 7 })
+
+const fg = canopy(shape, 6.0, { seed: 7, edge: 'overflow', overflow: 3.0 })
+writeFileSync('plot.svg', toSvg(strokes, shape))
 ```
 
 **Rust**
 
 ```rust
-use penfill::{geo::Region, zigzag::fill_zigzag, Anchor};
+use penfill::{
+    fill_by_name, fill_output_by_name,
+    geo::Region,
+    rectilinear::fill_rectilinear,
+    Anchor, EdgeMode, FillParams,
+};
 
-let square = vec![(0.0, 0.0), (80.0, 0.0), (80.0, 60.0), (0.0, 60.0)];
-let hole = vec![(30.0, 20.0), (50.0, 20.0), (50.0, 40.0), (30.0, 40.0)];
-let shape = Region::from_polygons(&[vec![square, hole]]);
+let outer = vec![(0.0, 0.0), (80.0, 0.0), (80.0, 60.0), (0.0, 60.0)];
+let hole  = vec![(30.0, 20.0), (50.0, 20.0), (50.0, 40.0), (30.0, 40.0)];
+let shape = Region::from_polygons(&[vec![outer, hole]]);
 
-let strokes = fill_zigzag(&shape, 1.0, 45.0, Anchor::LOCAL);
+// Unified parameter builder + name dispatch
+let params = FillParams::new(1.5).angle(20.0).seed(7).fray(8.0);
+let frayed = fill_by_name("waves", &shape, &params).unwrap();
+
+// Foreground fill with polygon mask export
+let fg = fill_output_by_name(
+    "canopy",
+    &shape,
+    &FillParams::new(6.0).seed(7).edge(EdgeMode::Overflow(3.0)),
+).unwrap();
+let bg = fill_rectilinear(&shape.difference(&fg.mask.outset(0.4)), 1.2, 35.0, None, Anchor::GLOBAL);
 ```
 
-That rectangle with a hole comes out as 2 strokes. Draw each stroke with the
-pen down from its first point to its last, then lift. `to_svg` writes an SVG
-in millimetres to look at or to send to your plotter software (vpype,
-Inkscape's AxiDraw extension, Saxi…).
+---
 
-## And about forty more
+## Contents
 
-![Six fills on a shape with a hole: concentric, wave grid, scales, gravel, terrazzo, truchet](docs/img/tour.svg)
+![Six fills on a smooth ring: concentric, wave grid, scales, gravel, swells, isoline stack](docs/img/tour.svg)
 
-- [How it works](#how-it-works)
-- [Lines and paths](#lines-and-paths)
-- [Lattices](#lattices)
-- [Scatter and nature](#scatter-and-nature)
-- [Materials](#materials)
-- [CAD hatch patterns](#cad-hatch-patterns)
-- [Pictures: dithering](#pictures-dithering)
-- [Placing a picture: size, position, repeat](#placing-a-picture-size-position-repeat)
-- [Build your own pattern](#build-your-own-pattern)
-- [Any shape](#any-shape)
-- [Gallery](#gallery)
-- [Development](#development)
-- [Roadmap](#roadmap)
-- [Lineage and license](#lineage-and-license)
+1. [How it works & Unified parameters](#how-it-works)
+2. [Edge fraying (`fray`), boundary modes (`edge`), and polygon masks (`FillOutput`)](#edge-fraying-boundary-modes-and-polygon-masks)
+3. [Lines and space-filling paths](#lines-and-space-filling-paths)
+4. [Lattices and waves](#lattices-and-waves)
+5. [Scatter and nature](#scatter-and-nature)
+6. [Materials, flow, and cellular textures](#materials-flow-and-cellular-textures)
+7. [Organic contours and differential growth](#organic-contours-and-differential-growth)
+8. [Geology and ground textures](#geology-and-ground-textures)
+9. [CAD hatch patterns (`.pat`)](#cad-hatch-patterns)
+10. [Pictures: dithering and CSS-style placement](#pictures-dithering)
+11. [Build your own pattern (`Canvas` & `Tools` standard library)](#build-your-own-pattern)
+12. [Any shape & Gallery reference](#any-shape)
+13. [Development](#development)
+
+---
 
 ## How it works
 
-Every fill takes a **region** and a few numbers and returns **strokes**.
+Every fill takes a **[`Region`](src/geo.rs)** and a standardized set of parameters ([`FillParams`](src/pattern.rs)) and returns **[`Strokes`](src/geo.rs)** (or a **[`FillOutput`](src/pattern.rs)** when a knockout mask is requested).
 
-- **A region** is a filled area in millimetres: one or more outer rings,
-each with any number of holes. `Region(outer, holes=[...])` makes one
-polygon; `Region.from_polygons([[outer, hole, ...], ...])` makes several.
-Regions can be shrunk (`inset`), grown (`outset`), intersected and
-subtracted. The geometry runs on [i_overlay](https://github.com/iShape-Rust/iOverlay),
-pure Rust (the engine under the `geo` crate).
-- **Strokes** are a list of polylines, each a list of `(x, y)` points in mm.
-Each polyline is one pen-down, and they come in drawing order.
+- **`Region`**: A 2D area in millimetres consisting of one or more outer rings, each with any number of holes. Construct with `Region(outer, holes=[...])` or `Region.from_polygons([[outer, hole, ...], ...])`. Regions support exact boolean operations (`union`, `intersection`, `difference`, `xor`), polygon offsetting (`inset`, `outset`), stroke buffering (`Region.around_strokes(strokes, radius)`), point/ring queries (`contains`, `covers_ring`, `distance`), connected components (`parts`), and polyline clipping (`clip`, `fray`).
+- **`Strokes`**: `Vec<Vec<(f64, f64)>>` — a list of open polylines in millimetres, in drawing order. Each polyline is one pen-down motion from its first point to its last.
 
-The parameters mean the same thing everywhere:
+### Standardized parameter vocabulary
 
-- **`spacing`** is the distance in mm between neighbouring lines, cells or
-marks. Use roughly your pen width or more.
-- **`angle`** is in degrees. It turns the pattern, not the shape.
-- **`inset`** (on the line fills) is how far from the wall the lines stop;
-by default half the spacing. Pattern fills run right up to the region you
-give them, so pass `region.inset(0.8)` for a margin.
-- **`seed`** controls the random fills. The same seed always gives the same
-drawing, so your plots can be reproduced.
-- **`anchor`** and **`shift`** (on every fill with a lattice: the hatches,
-lattices, grass, truchet, materials, chess, `.pat`, tiles, `profile` and
-`pattern`) say where the lattice sits. `anchor="local"`, the default, places
-it on the shape itself, usually centred. `anchor="global"` puts one lattice
-on the whole page, so neighbouring regions filled separately meet with no
-seam, as if they were one shape. `shift=(x, y)` moves the lattice that many
-mm from where its anchor puts it; with `"global"` it is the page point a
-lattice line passes through. In Rust it's the `Anchor` argument:
-`Anchor::LOCAL`, `Anchor::GLOBAL`, `Anchor::local(x, y)`,
-`Anchor::global(x, y)`. With `"global"`, `lines`, `grid` and `triangles`
-run right up to the walls; `rectilinear` and `zigzag` still stop `inset`
-from them, so pass `inset=0` for regions that share a border.
+Across Rust (`FillParams`), Python (keyword arguments), Node.js (`FillOptions`), and WebAssembly, parameter names have the same meaning on every pattern:
 
-**Naming across languages.** The tables below use the Python names. Node
-uses the same names in camelCase, with the optional arguments in an options
-object: `penfill.wave_grid(r, 2, angle=30)` in Python is
-`waveGrid(r, 2, { angle: 30 })` in Node. In Rust each fill is
-`penfill::<module>::fill_<name>`, e.g. `penfill::dotswaves::fill_wave_grid`.
+| Parameter | Rust (`FillParams`) | Python | Node (`FillOptions`) | Meaning |
+| --- | --- | --- | --- | --- |
+| **`spacing`** | `FillParams::new(s)` | `spacing` (1st arg) | `spacing` (2nd arg) | Primary pitch in mm between lines, cells, or marks |
+| **`angle`** | `.angle(deg)` | `angle=0.0` | `{ angle: 0 }` | Pattern rotation in degrees (rotates the pattern, not the region) |
+| **`seed`** | `.seed(u64)` | `seed=0` | `{ seed: 0 }` | Deterministic `SplitMix64` RNG seed |
+| **`inset`** | `.inset(mm)` | `inset=None` | `{ inset: 0.8 }` | Wall margin in mm applied before filling (`None` uses the pattern default) |
+| **`edge`** | `.edge(EdgeMode)` | `edge="clip"` | `{ edge: 'clip', overflow: 2.5 }` | Boundary mode: `"clip"`, `"inside"`, or `("overflow", mm)` |
+| **`fray`** | `.fray(mm)` | `fray=0.0` | `{ fray: 0 }` | Smooth perimeter disappearing band width in mm (`0.0` = hard edge) |
+| **`anchor`** | `.anchor(Anchor)` | `anchor="local"`, `shift=(x, y)` | `{ anchor: 'local', shift: [x, y] }` | `"local"` centres the lattice on the shape; `"global"` locks to page origin `(0, 0)` so adjacent shapes meet seamlessly |
+| **`with_mask`** | `fill_output_by_name` / `fill_*_params` | `with_mask=True` | `fillOutput` / `patternOutput` | Returns `FillOutput { strokes, mask }` with a polygon knockout `Region` |
 
-penfill only generates geometry. It doesn't draw the outline, sort strokes
-between separate fills or write G-code. Those belong to your plotting
-pipeline.
+### Unified pattern registry (`fill` / `fill_by_name`)
 
-**Extensibility.** Named fills like `zigzag` or `stipple_edge` are Rust
-functions that turn a region into strokes. Custom work goes through
-[`pattern`](#build-your-own-pattern), which uses the same clipping and the
-same optional [`tools`](#build-your-own-pattern) (Poisson scatter, Perlin
-noise, hatch lines, distance-to-wall). Built-ins could be rewritten on top
-of that API; you can mix built-ins and your own logic in one callback.
+Every built-in pattern (including all 53 geology/ground fills and `pat:<NAME>` hatches) can be inspected and called by name:
 
-## Lines and paths
+- **Python**: `penfill.FILLS` lists all pattern names; `penfill.fill(region, "gravel", spacing=2.5, fray=6.0)` returns `strokes`; `penfill.fill_output(region, "gravel", spacing=2.5)` returns `FillOutput(strokes, mask)`.
+- **Node.js**: `fills()` lists all pattern names; `fill(region, 'gravel', 2.5, { fray: 6.0 })` returns `strokes`; `fillOutput(region, 'gravel', 2.5, options)` returns `{ strokes, mask }`.
+- **Rust**: `penfill::all_fill_names()`, `penfill::fill_by_name(name, &region, &params)`, and `penfill::fill_output_by_name(name, &region, &params)`.
+
+---
+
+## Edge fraying, boundary modes, and polygon masks
+
+### 1. Universal edge fraying (`fray`)
+
+![Universal edge fraying across zigzag, waves, hex dots, gravel, tufts, and cell net](docs/img/fray.svg)
+
+Setting `fray > 0.0` (in millimetres) creates a smooth disappearing transition over a band of width `fray` inside the region's perimeter. A Perlin-modulated survival ramp $w(p) \in [0, 1]$ rises from $0$ at the boundary to $1$ at depth `fray` inside the shape, and [`fray_strokes`](src/fray.rs) automatically adapts to three geometric classes:
+
+1. **Continuous polylines and flow lines** (`zigzag`, `rectilinear`, `grid`, `waves`, `wood`, `marble`, `swells`, `eddies`, `hilbert`): Deep inside ($w \ge 0.88$) lines stay unbroken; in the mid-band ($0.30 \le w < 0.88$) lines break into progressively shorter dashes with widening gaps; near the outer edge ($0.10 \le w < 0.30$) dashes collapse into brief stipple ticks before vanishing ($w < 0.10$).
+2. **Discrete marks and botanical motifs** (`dots`, `stipple`, `tufts`, `twigs`, `leaves`, `granite`, `diorite`): Whole marks are stochastically thinned out as $w \to 0$ and surviving marks shrink smoothly toward their midpoint or root instead of being chopped into fragments.
+3. **Closed rings and cellular outlines** (`gravel`, `honeycomb`, `pebbles`, `canopy`, `cracks`): Cells shrink toward their centroid, stochastically drop out near the boundary, and break open into partial arcs in the outer fray zone.
+
+See [`examples/gallery/fray.svg`](examples/gallery/fray.svg) for the full 12-pattern progression from `fray = 0 mm` to `fray = 9 mm` (both with a dashed boundary guide and as floating ink on paper).
+
+### 2. Boundary modes (`EdgeMode`) and polygon masks (`FillOutput`)
+
+![EdgeMode::Clip, EdgeMode::Inside, EdgeMode::Overflow, FillOutput.mask, and multi-layer knockouts](docs/img/edges-and-masks.svg)
+
+When filling regions with cellular, botanical, or organic motifs, you can control how elements interact with the boundary via `edge` ([`EdgeMode`](src/pattern.rs)):
+
+- **`"clip"` (`EdgeMode::Clip`, default)**: Elements are generated up to the boundary and sliced cleanly along the region wall.
+- **`"inside"` (`EdgeMode::Inside`)**: Discrete elements (Voronoi stones, pebbles, canopies, isoline stacks, twigs, tufts) are kept **strictly whole** inside the region — any element that would cross the wall is omitted or shrunk so no open cut edges appear.
+- **`("overflow", margin_mm)` (`EdgeMode::Overflow(margin)`)**: Elements whose centres/roots lie inside `region` are allowed to protrude past the boundary by up to `margin` mm, giving organic foliage and stone clusters a natural silhouette.
+
+### 3. Multi-layer knockouts with `FillOutput.mask`
+
+Every fill can export a polygon **`mask: Region`** alongside its `strokes`:
+
+- **Closed-element fills** (`gravel`, `terrazzo`, `cracks`, `pebbles`, `lily_pads`, `canopy`, `isoline_blobs`, `isoline_stack`) register their exact closed polygon rings into `mask` (automatically unioned and clipped to the active `EdgeMode` limit).
+- **Line, mark, and frayed fills** compute an offset polygon halo around the emitted strokes (`Region::around_strokes(&strokes, halo)`), or return the effective region envelope when unfrayed.
+
+Subtracting `fg.mask` (optionally outset by a small clearance like `0.3 mm`) from lower layers lets you stack foreground and background fills with zero overlapping pen lines:
+
+```python
+fg = penfill.gravel(island, 4.8, seed=7, edge=("overflow", 3.5), with_mask=True)
+bg_region = backdrop.difference(fg.mask.outset(0.35))
+bg_strokes = penfill.rectilinear(bg_region, 1.35, angle=35, anchor="global")
+```
+
+See [`examples/gallery/edges-and-masks.svg`](examples/gallery/edges-and-masks.svg) for side-by-side comparisons across `canopy`, `gravel`, `isoline_stack`, `lily_pads`, and frayed `tufts`.
+
+---
+
+## Lines and space-filling paths
 
 ![rectilinear, zigzag, grid, triangles, concentric, hilbert](docs/img/lines.svg)
 
-The classic slicer infills. Rectilinear and zigzag come from an exact
-scanline sweep, so holes are always respected. Concentric, spiral and Hilbert are
-built from successive insets of the shape.
+Scanline hatches (`rectilinear`, `zigzag`, `lines`, `grid`, `triangles`) use a direct active-edge sweep (`src/sweep.rs`), while `concentric`, `spiral`, and `hilbert` are built from polygon offsets and space-filling curves. All accept `inset`, `edge`, `fray`, `anchor`, and `with_mask`.
 
+| Function | What it draws |
+| --- | --- |
+| `zigzag(region, spacing, angle=0, inset=None, fray=0)` | Serpentine hatch joined by short turns along the outline or hops across shallow concavities |
+| `rectilinear(region, spacing, angle=0, inset=None, fray=0)` | Parallel hatch after wall inset (`spacing / 2` by default), one stroke per segment |
+| `lines(region, spacing, angle=0, inset=None, fray=0)` | Single-direction scanline hatch running right up to the walls |
+| `grid(region, spacing, angle=0, inset=None, fray=0)` | Two orthogonal hatches at `angle` and `angle + 90°` |
+| `triangles(region, spacing, angle=0, inset=None, fray=0)` | Three hatches at 60° intervals meeting at shared lattice vertices |
+| `concentric(region, spacing, inset=None, fray=0)` | Successive inward offset rings plus a medial-axis centreline in narrow necks |
+| `spiral(region, spacing, inset=None, fray=0)` | Concentric offset rings linked into a single continuous inward path per lobe |
+| `hilbert(region, spacing, inset=None, fray=0)` | Space-filling Hilbert curve visiting the interior cell by cell |
 
-| Function                                            | What it draws                                                                                                          |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `zigzag(region, spacing, angle=0, inset=None)`      | Hatch joined into serpentines by turns along the outline, or short hops where it wanders off. Where neither fits, the pen lifts |
-| `rectilinear(region, spacing, angle=0, inset=None)` | Parallel hatch, one stroke per line fragment                                                                           |
-| `lines(region, spacing, angle=0)`                   | One-direction hatch over the whole region                                                                              |
-| `grid(region, spacing, angle=0)`                    | Two hatches at 90°                                                                                                     |
-| `triangles(region, spacing, angle=0)`               | Three hatches at 60° that all pass through the same crossings                                                          |
-| `concentric(region, spacing, inset=None)`           | Closed rings following the outline inwards, plus a centreline in parts too thin for a ring                             |
-| `spiral(region, spacing)`                           | One continuous path winding inwards, so the pen stays down. A shape that splits into lobes gets one spiral per lobe    |
-| `hilbert(region, spacing, inset=None)`              | Space-filling Hilbert curve: one long path that visits the interior cell by cell, clipped to the walls                   |
+---
 
-
-## Lattices
+## Lattices and waves
 
 ![honeycomb, dots hex, waves, wave grid, scales, sunburst](docs/img/lattices.svg)
 
-Regular patterns laid across the whole shape and clipped to it.
+Regular geometric lattices placed via `anchor` (`"local"` or `"global"`) and clipped or frayed at the region perimeter.
 
+| Function | What it draws |
+| --- | --- |
+| `honeycomb(region, spacing, angle=0, line_width=0, fray=0)` | Hexagonal cell walls, each shared edge drawn once (`line_width > 0` insets each hex cell) |
+| `dots(region, spacing, angle=0, mark=None, lattice="square", fray=0)` | Short ticks on a `"square"` or `"hex"` lattice |
+| `waves(region, spacing, angle=0, fray=0)` | Parallel sinusoidal waves |
+| `wave_grid(region, spacing, angle=0, fray=0)` | Ogee lattice: mirrored sine waves meeting to form curved diamonds |
+| `scales(region, spacing, angle=0, fray=0)` | Staggered rows of semicircular scale arcs, one continuous stroke per row |
+| `sunburst(region, spacing, angle=0, centre=None, fray=0)` | Radial rays from `centre` (or shape centroid), subdividing outward to maintain ~`spacing` pitch |
 
-| Function                                                      | What it draws                                                                                     |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `honeycomb(region, spacing, angle=0, line_width=0)`           | Hexagon walls, each drawn once. `spacing` is flat to flat; `line_width` opens a gap between cells |
-| `dots(region, spacing, angle=0, mark=None, lattice="square")` | Short marks on a square or `"hex"` lattice centred in the shape                                   |
-| `waves(region, spacing, angle=0)`                             | Parallel sine waves                                                                               |
-| `wave_grid(region, spacing, angle=0)`                         | Ogee: mirrored waves that close into diamonds                                                     |
-| `scales(region, spacing, angle=0)`                            | Fish scales or roof tiles; each row of arcs is one stroke                                         |
-| `sunburst(region, spacing, angle=0, centre=None)`             | Rays from a centre (the middle of the shape, or the page point `centre`), staggered so they stay about `spacing` apart |
-
+---
 
 ## Scatter and nature
 
-![stipple, stipple edge, gravel, gravel clipped, grass, scribble](docs/img/scatter.svg)
+![stipple, stipple edge, pebbles, tufts, twigs, canopy](docs/img/scatter.svg)
 
-Random but reproducible. Placement uses Poisson-disk sampling, so marks are
-evenly spread without looking like a grid.
+![sprouts, fluid grass, vines, lily pads, grass, scribble](docs/img/nature.svg)
 
+Stochastic and botanical patterns built on Bridson's Poisson-disk sampler (`src/stipple.rs`), Perlin vector fields, and `Canvas` + `Tools`.
 
-| Function                                                                       | What it draws                                                                                                                            |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `stipple(region, spacing, mark=None, seed=0)`                                  | Evenly spread short marks                                                                                                                |
-| `stipple_noise(region, dense, sparse, mark=None, feature=12, seed=0)`          | Density drifts with Perlin noise, for cloudy tone                                                                                        |
-| `stipple_edge(region, dense, sparse, mark=None, falloff=8, rough=0.5, seed=0)` | Dense along the wall, fading inwards over `falloff` mm with a noisy front: the cartographic shading for lakes and coasts                 |
-| `stipple_field(region, dense, sparse, field, mark=None, seed=0)`               | Density from your own function; see [Build your own pattern](#build-your-own-pattern)                                                    |
-| `gravel(region, spacing, seed=0, clipped=False)`                               | Rounded Voronoi stones. Near the wall the stones get smaller to fit into corners; `clipped=True` cuts uniform stones at the wall instead |
-| `grass(region, spacing, angle=0, seed=0)`                                      | Grass tufts as a repeating hatch tile, cut by the wall                                                                                   |
-| `pebbles(region, spacing, seed=0)`                                             | Small rounded stones — circle outlines on a Poisson grid (lighter than gravel)                                                           |
-| `leaves(region, spacing, seed=0)`                                              | Sparse sprout tile — offset rows of blades and V marks (alias: same as `sprouts` in WASM)                                                |
-| `fluid_grass(region, spacing, seed=0)`                                         | Loose curved grass — single blades, V-tufts and fans on a jittered Poisson field                                                         |
-| `lily_pads(region, spacing, seed=0)`                                           | Equal circles with centre dots; overlapping pads merge to one outline                                                                    |
-| `canopy(region, spacing, seed=0)`                                              | Top-down canopies — clustered wobbly lobes with a centre dot per lobe (`spacing` ≈ distance between trees)                               |
-| `scribble(region, spacing, angle=0, seed=0)`                                   | Hand-drawn cross-hatching with wobbly, broken lines                                                                                      |
-| `truchet(region, cell, angle=0, seed=0)`                                       | Random quarter-circle tiles that join into long winding paths                                                                            |
+| Function | What it draws |
+| --- | --- |
+| `stipple(region, spacing, mark=None, seed=0, fray=0)` | Evenly spaced Poisson-disk ticks (`mark` defaults to `0.3 × spacing`) |
+| `stipple_noise(region, dense, sparse, mark=None, feature=12, seed=0, fray=0)` | Poisson stipple whose local spacing varies smoothly with Perlin noise |
+| `stipple_edge(region, dense, sparse, mark=None, falloff=8, rough=0.5, seed=0, fray=0)` | Dense along the perimeter (`dense` mm), thinning inward over `falloff` mm (`sparse` mm) |
+| `stipple_field(region, dense, sparse, field, mark=None, seed=0, fray=0)` | Custom density field `field(x, y) -> [0, 1]` (works whether `dense < sparse` or `dense > sparse`) |
+| `pebbles(region, spacing, seed=0, edge="clip", fray=0)` | Smooth rounded pebble rings on a Poisson grid |
+| `leaves(region, spacing, seed=0, edge="clip", fray=0)` | Staggered rows of curved blades and V-sprouts (also aliased as `sprouts`) |
+| `fluid_grass(region, spacing, seed=0, edge="clip", fray=0)` | Single blades, V-tufts, and 3-blade fans aligned to a smooth Perlin vector field |
+| `tufts(region, spacing, angle=0, seed=0, edge="clip", fray=0)` | Organic bands of 1- and 2-blade grass tufts with motif-level border thinning |
+| `twigs(region, spacing, seed=0, edge="clip", fray=0)` | Scattered branched twigs with kinked 3–4 segment spines and acute side shoots |
+| `vines(region, spacing, angle=90, seed=0, edge="clip", fray=0)` | Parallel meandering stems with alternating side-shoots |
+| `lily_pads(region, spacing, seed=0, edge="clip", fray=0)` | Circular pads with centre dots; overlapping pads boolean-union into merged outlines |
+| `canopy(region, spacing, seed=0, edge="clip", fray=0)` | Top-down tree canopies: clustered wobbly lobes with interior stipple dots |
+| `grass(region, spacing, angle=0, seed=0, fray=0)` | Repeating 4×4 hatch tile of 3-blade grass tufts |
+| `scribble(region, spacing, angle=0, seed=0, fray=0)` | Hand-drawn cross-hatching with jittered, broken strokes |
 
+---
 
-## Materials
+## Materials, flow, and cellular textures
 
-![marble, wood, cracks, terrazzo, chess, truchet](docs/img/materials.svg)
+![gravel, terrazzo, marble, wood, cracks, cell net](docs/img/materials.svg)
 
-Textures built from noise fields and contour lines.
+![eddies, swells, ripples, truchet, chess, gravel clipped](docs/img/flow.svg)
 
+Cellular Voronoi tessellations, Jobard–Lefer streamline integration, horizon-occluded wave hills, and domain-warped contour textures.
 
-| Function                                     | What it draws                                                                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `marble(region, spacing, angle=0, seed=0)`   | Veins from domain-warped noise                                                                                                                |
-| `wood(region, spacing, angle=0, seed=0)`     | Growth rings bending around knots placed inside the shape                                                                                     |
-| `cracks(region, spacing, seed=0)`            | Parched ground / mud cracks — wobbly net along Voronoi edges                                                                                    |
-| `terrazzo(region, size, hatch=None, seed=0)` | Chips of many sizes that never overlap. About a third are dark, drawn with an open hatch or cross-hatch `hatch` mm apart (default `size / 6`) |
-| `chess(region, cell, spacing=None, angle=0)` | Checkerboard with the dark squares hatched                                                                                                    |
+| Function | What it draws |
+| --- | --- |
+| `gravel(region, spacing, seed=0, clipped=False, edge="inside", fray=0)` | Rounded Voronoi stones that shrink near the wall to fit corners (`clipped=True` cuts uniform stones) |
+| `terrazzo(region, size, hatch=None, seed=0, edge="clip", fray=0)` | Non-overlapping angular chips across a wide size range; ~1/3 are hatched at `hatch` mm |
+| `marble(region, spacing, angle=0, seed=0, fray=0)` | Domain-warped turbulent veins drawn as paired edge contours |
+| `wood(region, spacing, angle=0, seed=0, fray=0)` | Grain lines flowing and bending around randomly placed interior knots |
+| `cracks(region, spacing, seed=0, edge="clip", fray=0)` | Parched ground: rounded Voronoi cells with wide grout channels |
+| `cell_net(region, spacing, seed=0, edge="clip", fray=0)` | Single-line Voronoi crack network where shared walls are drawn once with subtle angular kinks |
+| `eddies(region, spacing, angle=0, seed=0, fray=0)` | Continuous streamlines integrated through an undulating current + vortex field (Jobard–Lefer placement) |
+| `swells(region, spacing, angle=0, seed=0, fray=0)` | Overlapping wave hills rendered front-to-back with horizon occlusion and fanning contour ribs |
+| `ripples(region, spacing, angle=0, seed=0, fray=0)` | Broken undulating wave strokes sharing a smooth 2D swell phase field |
+| `truchet(region, cell, angle=0, seed=0, fray=0)` | Random quarter-circle Smiths tiles joining into long winding paths |
+| `chess(region, cell, spacing=None, angle=0, fray=0)` | Checkerboard lattice with dark squares outlined and hatched |
 
+---
 
-## Geology (map symbols)
+## Organic contours and differential growth
+
+![isoline blobs, isoline stack, isoline stack (lit), growth (meander), growth (fine), growth (frayed)](docs/img/organic.svg)
+
+Multi-scale organic topography and biological curve growth (`src/isoline_blobs.rs`, `src/isoline_stack.rs`, `src/growth.rs`).
+
+| Function | What it draws |
+| --- | --- |
+| `isoline_blobs(region, spacing, ring_spacing=None, seed=0, edge="clip", fray=0)` | Scattered organic blobs filled with nested eccentric contour rings; exports exact blob `mask` |
+| `isoline_stack(region, crown=6.0, bubble=2.0, step=0.6, coverage=0.65, seed=0, edge="inside", fray=0)` | Occluding metaball clusters with concentric contour stacks and optional directional lighting (`Light`) |
+| `growth(region, spacing=1.2, seed=0, edge="clip", fray=0)` | Differential-growth meandering and branching curves driven by repulsion, attraction, and curvature springs |
+
+---
+
+## Geology and ground textures
 
 ![granite, arena, breccia, coal, gneiss, ferrous](docs/img/geology.svg)
 
 ![diorite, conglomerate, masonry, diatom, amphibolite, hornblende](docs/img/geology-2.svg)
 
-Cartographic lithology hatches built from one small pattern language: a base
-lattice, a mark, and jitter, clipped to the region. The names follow the
-lithologies you find on a geological sheet.
+53 cartographic rock and soil hatches (`src/litho.rs`), built on deterministic cell-seeded lattices (`Tools::grid`) and Voronoi primitives. Every lithology can be called directly (`penfill.granite(...)`) or by name (`penfill.fill(region, "granite", spacing=2.5, fray=6.0)`), and all support `inset`, `edge`, `fray`, and `with_mask`.
 
-| Igneous | Clastic | Bedded | Organic | Metamorphic / special |
-| ------- | ------- | ------ | ------- | --------------------- |
-| `granite` `+` | `arena` dots | `beds` wavy horizons | `diatom` ring motifs | `gneiss` aligned dashes |
-| `granite2` `×` | `conglomerate` round pebbles | `laminae` fine waves | `diatom2` denser rings | `bentonite` dash columns |
-| `diorite` `T` | `conglomerate2` flat pebbles | `coal` dashed seams | `coquina` shell spirals | `amphibolite` vertical zigzag |
-| `gabbro` `V` | `breccia` angular fragments | `masonry` running-bond brick | | `ferrous` checkerboard |
-| `brackets` `└┘` | `breccia2` blobs | | | `lava` vertical bars |
-| `dacite` crystal dashes | `shards` sparse shards | | | `hornblende` crystal capsules |
-| `feldspar` dense strokes | `drift` tilted pebbles | | | `diabase` dense hatch \| `fill` cross hatch |
-| | `silty_soil` small cells | | | `ophitic` laths + pyroxene grain |
+| Igneous | Clastic | Bedded | Organic | Metamorphic / Special |
+| --- | --- | --- | --- | --- |
+| `granite` (`+` marks) | `arena` (fine dots) | `beds` (wavy horizons) | `diatom` (ring + dot) | `gneiss` (foliation dashes) |
+| `granite2` (`×` grain) | `conglomerate` (round pebbles) | `laminae` (fine waves) | `diatom2` (denser rings) | `benton` / `bentonite` (dash columns) |
+| `diorite` (`T` marks) | `conglomerate2` (flat pebbles) | `coal` (dashed seams) | `coquina` (shell spirals) | `amphibolite` (vertical zigzag) |
+| `gabbro` (`V` marks) | `breccia` (angular clasts) | `masonry` (running bond) | | `ferrous` (ironstone check) |
+| `brackets` (`└ ┘` marks) | `breccia2` (rounded clasts) | `sandstone` (dots + beds) | | `lava` (columnar bars) |
+| `dacite` (crystal dashes) | `shards` (volcanic shards) | | | `hornblende` (crystal capsules) |
+| `feldspar` (dense strokes) | `drift` (tilted pebbles) | | | `diabase` (dense hatch) |
+| | `sand` (dense fine grain) | | | `ophitic` (laths + pyroxene) |
+| | | | | `fill` (woven cross-hatch) |
 
-All take `(region, spacing, seed=0)`; `dacite`, `feldspar`, `beds`, `laminae`,
-`coal`, `gneiss`, `bentonite`, `diabase`, `ophitic`, `erosion`, `mulch`,
-`layered_soil`, `clay_soil`, `fill` and `hornblende` also take an `angle` in
-degrees.
-
-### Ground and stone
+### Ground, soil, and weathered surfaces
 
 ![fine gravel, coarse stone, pebble scatter, mixed rocks, cracked earth, grainy soil](docs/img/ground.svg)
 
 ![erosion lines, stone cluster, gravelly soil, mulch, clay soil, pebbled soil](docs/img/ground-2.svg)
 
-Loose materials and weathered surfaces, for the areas between outcrops.
-
-| | | | |
+| Coarse / Stony | Cracked / Cellular | Layered / Wavy | Granular / Mulched |
 | --- | --- | --- | --- |
-| `fine_gravel` dots + rings | `coarse_stone` grained cells | `pebble_scatter` spaced ovals | `mixed_rocks` varied cells |
-| `cracked_earth` cells + grain | `grainy_soil` fine dots | `erosion` parallel waves | `stone_cluster` tight pebbles |
-| `gravelly_soil` short dashes | `mulch` staggered dashes | `mulched_soil` finer rows | `layered_soil` stacked horizons |
-| `topsoil` mixed dots | `pebbled_soil` squares | `loose_soil` open specks | `silty_soil` tight cells |
-| `clay_soil` broad waves | `compacted_soil` thin waves | `sandy_soil` fine grain | `dry_cracked` mud cracks |
+| `fine_gravel` (dots + rings) | `cracked_earth` (cells + grain) | `erosion` (fine parallel waves) | `grainy_soil` (dense fine dots) |
+| `coarse_stone` (grained blocks) | `dry_cracked` (mud cracks) | `layered_soil` (stacked horizons) | `gravelly_soil` (scattered dashes) |
+| `pebble_scatter` (spaced ovals) | `silty_soil` (tight silt cells) | `clay_soil` (broad smooth waves) | `mulch` (staggered dashes) |
+| `mixed_rocks` (varied stone cells) | `chalky_soil` (dots + open net) | `compacted_soil` (tight waves) | `mulched_soil` (finer dash rows) |
+| `stone_cluster` (packed pebbles) | `debris_soil` (chips + specks) | | `topsoil` (3-size dot grain) |
+| `pebbled_soil` (squares/diamonds) | | | `loose_soil` (open rings + dots) |
+| | | | `sandy_soil` (fine sandy grain) |
 
-These are all `(region, spacing, seed=0)`; `erosion`, `mulch`, `layered_soil`
-and `clay_soil` also take an `angle`.
-
+---
 
 ## CAD hatch patterns
 
 ![brick, herringbone, parquet, earth, ansi37, cross](docs/img/cad.svg)
 
-The AutoCAD `.pat` format: each pattern is a set of line families with an
-angle, an origin, an offset between lines and an optional dash sequence.
-penfill has 14 built in, written for this project in the style of the
-classics: `BRICK`, `HERRINGBONE`, `BASKET`, `PARQUET`, `ANSI31`, `ANSI32`,
-`ANSI33`, `ANSI37`, `EARTH`, `CROSS`, `DASH`, `STAIRS`, `GRATE`, `ANGLE`.
-Any `.pat` file you already have loads too.
+`penfill` parses standard AutoCAD / LibreCAD / QCAD `.pat` files and ships with 14 built-in definitions: `BRICK`, `HERRINGBONE`, `BASKET`, `PARQUET`, `ANSI31`, `ANSI32`, `ANSI33`, `ANSI37`, `EARTH`, `CROSS`, `DASH`, `STAIRS`, `GRATE`, `ANGLE`.
 
 ```python
-bricks = penfill.pat(shape.inset(0.8), "BRICK", scale=1.6)       # 1 pattern unit = 1.6 mm
+bricks = penfill.pat(shape, "BRICK", scale=1.6, fray=6.0)
 
 source = open("acad.pat").read()
 print(penfill.pat_names(source))
-mine = penfill.pat(shape, "AR-PARQ1", scale=0.5, source=source)
+custom_pat = penfill.pat(shape, "AR-PARQ1", scale=0.5, source=source)
 ```
+
+---
 
 ## Pictures: dithering
 
 ![A lit ball, then dithered five ways: Bayer dots, halftone lines at 45°, Floyd–Steinberg lines, Atkinson dots, Jarvis lines 1 mm apart](docs/img/dither.svg)
 
-A pen can't draw grey, so `dither` lays a picture over the shape (scaled to
-cover it and centred, unless you [place it](#placing-a-picture-size-position-repeat))
-and decides cell by cell whether to ink it. The cells are
-`resolution` mm long along a line and `line_spacing` mm apart, and the grid
-can be turned by `angle` while the picture stays put.
+`dither` places an image over `region` and converts tone into plotter strokes on a grid of `resolution × line_spacing` mm cells rotated by `angle`:
 
-- **`marks="lines"`** (the default) joins dark cells next to each other into
-one stroke and runs the lines back and forth, like a line engraving. It
-lifts the pen far less than dots do.
-- **`marks="dots"`** draws a short tick on each dark cell (`mark` mm long).
+- **`marks="lines"`** (default): Connects adjacent dark cells along each scanline into serpentine strokes for fast plotting.
+- **`marks="dots"`**: Emits a short tick on each dark cell.
+- **`method`**: `"threshold"`, `"random"`, `"bayer2"` … `"bayer16"`, `"halftone2"` … `"halftone16"`, `"floyd-steinberg"` (default), `"atkinson"`, `"jarvis"`, `"stucki"`, `"sierra"`.
 
+### Placing a picture or SVG: `size`, `position`, `repeat`
 
-| `method`                               | Look                                                                                                |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `threshold`                            | Black or white at 50 %, posterised                                                                  |
-| `random`                               | White-noise threshold, grainy like film                                                             |
-| `bayer`, `bayer2` … `bayer16`          | Ordered dither, the crosshatch of early computer graphics                                           |
-| `halftone`, `halftone2` … `halftone16` | Clustered dots that grow with the darkness, like newspaper print. Try it with `angle=45`            |
-| `floyd-steinberg` (default)            | Error diffusion, the classic                                                                        |
-| `atkinson`                             | Error diffusion that drops a quarter of the error: crisper, lighter shadows, the old Macintosh look |
-| `jarvis`, `stucki`, `sierra`           | Error diffusion over a wider neighbourhood: smoother gradients                                      |
+![Picture and SVG placement: cover, contain, repeat, repeat-x](docs/img/placement.svg)
 
+Both `dither` and `svg_fill` accept CSS-style placement options measured against the region's bounding box:
 
-`gamma` above 1 darkens the midtones and below 1 lightens them; `invert=True`
-inks the light parts.
+- **`size`**: `"cover"`, `"contain"`, `"fill"`, a width in mm (`14`, `"14mm"`, `"50%"`), or width and height (`"20 auto"`, `(40, 10)`).
+- **`position`**: `"center"`, `"top left"`, `"bottom"`, `"25% 75%"`, `"5 10"`.
+- **`repeat`**: `"no-repeat"` (default), `"repeat"`, `"repeat-x"`, `"repeat-y"`.
 
-```python
-strokes = penfill.dither(shape, "portrait.jpg", resolution=0.5, method="atkinson", marks="dots")
-strokes = penfill.dither(shape, "portrait.jpg", resolution=0.3, line_spacing=0.8, angle=30)
-```
-
-The picture can be a file path or the file's bytes (PNG, JPEG, GIF, BMP,
-WebP). In Python it can also be a numpy array or nested lists of pixels
-(grey or RGB, 0–1 or 0–255); in Node, `{ width, height, data }`, which is
-what a canvas `ImageData` already is. Image row 0 goes at the smallest y, as
-in SVG.
-
-```js
-const strokes = dither(shape, readFileSync('portrait.jpg'), { method: 'halftone6', angle: 45, resolution: 0.6 })
-```
-
-## Placing a picture: size, position, repeat
-
-![The picture covering a doughnut, contained in a star, repeated every 14 mm, repeated along the top only; an SVG flower repeated every 9 mm and contained in a star](docs/img/placement.svg)
-
-`dither` and `svg_fill` place their picture the way CSS places a
-`background-image`, measured against the shape's bounding box, then clip
-it to the outline. Where no copy of the picture lands, the paper stays blank.
-
-
-| Option     | Values                                                                                                                                               | Like CSS              |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| `size`     | `"cover"`, `"contain"`, `"fill"` (stretch to the box), a width (`14`, `"14mm"`, `"50%"`), or width and height (`"20 auto"`, `"auto 30"`, `(40, 10)`) | `background-size`     |
-| `position` | `"center"`, `"top left"`, `"bottom"`, `"25% 75%"`, `"5 10"` (mm from the top left corner)                                                            | `background-position` |
-| `repeat`   | `"no-repeat"` (default), `"repeat"`, `"repeat-x"`, `"repeat-y"`                                                                                      | `background-repeat`   |
-
-
-Numbers are millimetres, percentages are of the bounding box (for `position`,
-the CSS meaning: `"100%"` puts the picture's far edge on the box's far edge).
-"Top" is the smallest y, as in SVG. `dither` defaults to `cover` and
-`svg_fill` to `contain`; both start centred and don't repeat.
-
-```python
-# a photo, tiled every 14 mm, starting from the top left corner
-strokes = penfill.dither(shape, "portrait.jpg", size=14, position="top left", repeat="repeat")
-
-# an SVG, fitted inside the shape
-strokes = penfill.svg_fill(shape, open("flower.svg").read(), size="contain")
-
-# a band along the top edge
-strokes = penfill.dither(shape, "portrait.jpg", size=16, position="top", repeat="repeat-x")
-```
-
-```js
-const strokes = svgFill(shape, flower, { size: 9, repeat: 'repeat' })
-const band = dither(shape, 'portrait.jpg', { size: '100% 20%', position: 'top' })
-```
-
-In Rust, build a `Placement` with `Placement::parse(size, position, repeat)`
-(or by hand from `Size`, `Length` and `Repeat`), then set
-`DitherOptions::placement` or call `fill_svg_placed`.
+---
 
 ## Build your own pattern
 
 ![sin x · cos y isolines, ripples from three sources, sawtooth profile, SVG tile, SVG clipped as is](docs/img/custom.svg)
 
-This is how penfill is meant to grow. The forty-odd built-in fills are
-implementations on the same footing as your code: geometry in, strokes out,
-clipped to the region. [`pattern`](#build-your-own-pattern) is the public
-entry point for that architecture — not a separate “custom” mode.
+Every built-in pattern in `penfill` is written against the same [`Canvas`](src/pattern.rs) and [`Tools`](src/pattern.rs) contract exposed by `pattern` / `fill_pattern_output`. When you write a custom pattern function, the engine:
+1. Applies `inset` and resolves `canvas.limit` according to `edge` (`Clip`, `Inside`, or `Overflow(margin)`),
+2. Binds `Canvas` and `Tools` to the region, seed, spacing, angle, anchor, edge mode, and fray width,
+3. Runs your callback to collect `Strokes` (and any semantic mask polygons registered via `tools.add_mask_ring` / `tools.add_mask`),
+4. Clips the strokes to `canvas.limit`, applies universal perimeter fraying if `fray > 0` (unless your pattern called `tools.claim_fray()`), and builds the `FillOutput.mask` polygon region.
 
-**The core API: `pattern`.** You write a function; penfill calls it once
-with two arguments and cuts whatever it returns to the shape, around the
-holes, in one pass.
+### `Canvas` reference
 
-```python
-def my_pattern(canvas, tools):
-    ...
-    return strokes          # lines anywhere on the page
+| Property / Method | Rust | Python / Node | Description |
+| --- | --- | --- | --- |
+| `region` | `canvas.region` | `canvas.region` | Target `Region` (after `inset`) |
+| `limit` | `&canvas.limit` | `canvas.limit` | Clipping envelope (`region` for `Clip`/`Inside`, `region.outset(m)` for `Overflow(m)`) |
+| `bounds` | `canvas.bounds` | `canvas.bounds` | `(min_x, min_y, max_x, max_y)` in mm |
+| `origin` | `canvas.origin` | `canvas.origin` | Resolved anchor point `(x, y)` in mm |
+| `spacing`, `angle`, `seed`, `fray` | `canvas.spacing`, … | `canvas.spacing`, … | Active fill parameters |
+| `edge` | `canvas.edge` | `canvas.edge` | Active `EdgeMode` (`"clip"`, `"inside"`, `"overflow"`) |
+| `accept_ring(ring)` | `canvas.accept_ring(&ring)` | `canvas.accept_ring(ring)` | `true` if `ring` satisfies `EdgeMode` (`covers_ring` for `Inside`, intersects `region` otherwise) |
 
-strokes = penfill.pattern(shape, my_pattern, seed=0)
-```
+### `Tools` standard library reference
 
-- **`canvas`** is where you are drawing, in the same millimetres as the
-  shape: `canvas.region` (the shape itself), `canvas.bounds`
-  (`min_x, min_y, max_x, max_y`) and `canvas.seed`. Ask the region anything:
-  `distance(point)` from the nearest wall or hole, `contains(point)`,
-  `parts()` for the separate pieces, `inset`, `outset`, `clip`.
-- **`tools`** is the same optional toolkit the built-in fills use internally
-  (stipple, edge-weighted stipple, noise-driven scatter, …), already bound to
-  the canvas region and seed. Use it to stay aligned with penfill, or ignore
-  it and call numpy, your own libraries, anything. If your function takes
-  only `canvas`, penfill doesn't pass `tools`.
+| Category | Method | What it provides |
+| --- | --- | --- |
+| **RNG & Noise** | `rng()`, `rng_salted(salt)`, `cell_rng(i, j)` | Deterministic `SplitMix64` RNG streams (global-anchor safe per cell `(i, j)`) |
+| | `noise(x, y, octaves=1)` | Multi-octave Perlin fBm in `[-1, 1]` |
+| | `curl(x, y, eps=0.01)` | Divergence-free 2D velocity vector `(vx, vy)` from Perlin potential |
+| **Frames & Lattices** | `frame(angle)` | Anchored coordinate `Frame` (`world(uv)`, `local(xy)`, `span(region, pad)`) |
+| | `grid(dx, dy, angle, row_shift, jitter, f)` | Iterates lattice cells inside `region` with deterministic per-cell RNG |
+| | `grid_cells(dx, dy, angle, row_shift, margin, f)` | Iterates all lattice cells across `limit + margin` |
+| **Sampling & Scanlines** | `scatter(spacing)`, `scatter_in(region, spacing)` | Bridson Poisson-disk points |
+| | `scatter_field(dense, sparse, field)` | Variable-density Poisson-disk points driven by `field(x, y) -> [0, 1]` |
+| | `hatch(spacing, angle=0)` | Anchored scanline hatch clipped to `region` |
+| | `isolines(cell, levels, f)` | Marching-squares contour lines of scalar field `f(x, y)` |
+| | `profile(spacing, angle, f)` | Parallel lines bent by 1D wave function `f(x)` |
+| **Voronoi & Cells** | `voronoi_cells(sites, max_radius)` | Exact half-plane clipped Voronoi cells `Vec<(site_idx, site_pt, ring)>` |
+| | `voronoi_edges(sites, max_radius)` | Deduplicated shared Voronoi edges `Vec<(i, j, pt_a, pt_b)>` (each wall once) |
+| **Shapes & Curves** | `circle(c, r)`, `lobe(c, r, phase, rough)`, `arc(c, r, a0, a1, steps)` | Closed rings, organic foliage lobes, and circular arcs |
+| | `tick(c, angle, half)`, `cross(c, half, twist)`, `x_cross(c, half, twist)` | Centred crystal/stipple marks |
+| | `smooth(ring, passes)`, `catmull_rom(pts, tension, subdivs)`, `resample(pts, step)` | Chaikin corner cutting, cardinal splines, and uniform arc-length resampling |
+| **Boundary & Fray** | `border_ramp(pt, falloff, rough)` | Noisy `[0, 1]` distance ramp (`0` at wall, `1` at depth `falloff` mm) |
+| | `whole_at(pt)` | Smooth `[0, 1]` survival weight inside the active `fray` band |
+| | `element_fits(center, radius)` | Checks whether a motif of `radius` at `center` satisfies `EdgeMode` |
+| | `claim_fray()` | Marks that the pattern handles `fray` at the motif level (skips post-pass stroke chopping) |
+| **Masks & Scoping** | `add_mask_ring(ring)`, `add_mask(region)`, `set_mask_halo(r)` | Contributes closed silhouettes or regions to `FillOutput.mask` |
+| | `on(region)`, `seeded(salt)`, `with_spacing(s)`, `with_edge(e)`, `with_fray(f)` | Scoped `Tools` clones for sub-regions or multi-layer patterns |
 
-| `tools.` | What it gives you |
-|---|---|
-| `noise(x, y, octaves=1)` | Smooth Perlin noise, roughly −1 to 1, one bump per unit |
-| `scatter(spacing)` | Random points in the shape that keep their distance |
-| `scatter_field(dense, sparse, field)` | The same, `dense` mm apart where `field(x, y)` is 0, `sparse` where it is 1 |
-| `hatch(spacing, angle=0)` | Parallel lines cut to the shape, right up to the walls |
-| `on(region, seed=None)` | The same tools for another region, e.g. one of `canvas.region.parts()` |
+### Example: Writing a custom Voronoi stone pattern with `EdgeMode`, `fray`, and `mask`
 
-You can ignore the geometry and cover the bounding box, call built-in fills
-and mix them, or go piece by piece. Splitting the shape costs time, so it
-only happens when you call `parts()`.
-
-```python
-import math
-
-def circles(canvas, tools):
-    x0, y0, x1, y1 = canvas.bounds
-    ring = lambda x, y: [(x + math.cos(a / 6), y + math.sin(a / 6)) for a in range(38)]
-    return [ring(x, y) for x, y in tools.scatter(3.0)]
-
-def one_angle_per_piece(canvas, tools):
-    return [s for i, part in enumerate(canvas.region.parts())
-            for s in tools.on(part).hatch(1.0, angle=30 * i)]
-
-strokes = penfill.pattern(shape, circles, seed=7)
-```
-
-Because built-ins and custom patterns share `tools`, a built-in can be
-recreated from the outside. This is `stipple_edge`, dot for dot:
+**Python**
 
 ```python
-def my_stipple_edge(canvas, tools):
-    def density(x, y):
-        near_wall = min(canvas.region.distance((x, y)) / 8.0, 1.0)
-        return near_wall + 0.5 * tools.noise(x / 8.0, y / 8.0, octaves=2) * 0.5
-    return penfill.stipple_field(canvas.region, 0.8, 4.0, density, seed=canvas.seed)
+import penfill
 
-assert penfill.pattern(shape, my_stipple_edge, seed=1) == penfill.stipple_edge(shape, 0.8, 4.0, seed=1)
+def my_stones(canvas, tools):
+    strokes = []
+    for idx, center, ring in tools.voronoi_cells(tools.scatter(canvas.spacing), canvas.spacing * 1.8):
+        if not canvas.accept_ring(ring):
+            continue
+        smooth_ring = tools.smooth(ring, passes=2)
+        tools.add_mask_ring(smooth_ring)
+        strokes.append(smooth_ring)
+    return strokes
+
+out = penfill.pattern(
+    shape,
+    my_stones,
+    spacing=4.0,
+    seed=7,
+    edge="inside",
+    fray=6.0,
+    with_mask=True,
+)
 ```
 
-In Node it's the same with camelCase names; `distance` takes `(x, y)`:
+**Rust**
 
-```js
-const strokes = pattern(shape, (canvas, tools) =>
-  tools.scatter(3).map(([x, y]) => [[x - 0.5, y], [x + 0.5, y]]), { seed: 7 })
+```rust
+use penfill::{fill_pattern_output, EdgeMode, FillParams};
+
+let params = FillParams::new(4.0).seed(7).edge(EdgeMode::Inside).fray(6.0);
+let out = fill_pattern_output(&shape, &params, |canvas, tools| {
+    let sites = tools.scatter(canvas.spacing);
+    let mut strokes = Vec::new();
+    for (_, _, ring) in tools.voronoi_cells(&sites, canvas.spacing * 1.8) {
+        if !canvas.accept_ring(&ring) {
+            continue;
+        }
+        let smooth = tools.smooth(&ring, 2);
+        tools.add_mask_ring(&smooth);
+        strokes.push(smooth);
+    }
+    strokes
+});
 ```
 
-In Rust, `pattern::fill_pattern(&region, seed, anchor, |canvas, tools| ...)`
-gets a `pattern::Canvas` and a `pattern::Tools`. `canvas.origin` is the
-anchor resolved for this region, the point to build your lattice through;
-`tools.hatch` already uses it.
+---
 
-**A function of position, drawn as contour lines.** `isolines` samples
-`f(x, y)` every `cell` mm and draws the levels you ask for, joined into long
-strokes.
+## Any shape & Gallery reference
 
-```python
-from math import sin, cos
+![Concentric fill on six shapes: square, rounded card, ring with hole, island with pond, star, and two-part archipelago](docs/img/shapes.svg)
 
-strokes = penfill.isolines(shape, lambda x, y: sin(x / 3) * cos(y / 3), penfill.levels_every(-1, 1, 0.25))
-```
+Holes, concave bays, sharp corners, and multi-polygon archipelagos are handled automatically across every fill.
 
-**A profile, repeated.** `profile` draws `y = f(x)` again every `spacing` mm,
-turned by `angle`. Sawtooth, square waves and seismograph traces are one line
-each.
+### SVG Gallery (`examples/gallery/`)
 
-```js
-const strokes = profile(shape, 2.5, (x) => ((x / 4) % 1) * 1.8, { angle: 20 })
-```
+Running `cargo run --release --example gallery` generates the complete vector reference suite in [`examples/gallery/`](examples/gallery):
 
-**A density function for stippling.** `stipple_field` takes a function that
-returns 0 where the marks should be densest and 1 where sparsest.
+- **[`gallery.svg`](examples/gallery/gallery.svg)**: Categorized visual reference poster showing all 94 built-in patterns grouped by family, each rendered side-by-side on a crisp square and on a frayed organic contour (`fray = 8.5 mm`).
+- **[`all-patterns.svg`](examples/gallery/all-patterns.svg)**: Compact alphabetical index grid of all 94 patterns.
+- **[`fray.svg`](examples/gallery/fray.svg)**: Universal edge fraying progression (`0 mm` → `4.5 mm` → `9.0 mm` with guide → `9.0 mm` ink only) across lines, waves, discrete marks, botanicals, and Voronoi cells.
+- **[`edges-and-masks.svg`](examples/gallery/edges-and-masks.svg)**: Side-by-side showcase of `EdgeMode::Clip`, `EdgeMode::Inside`, `EdgeMode::Overflow(3.5)`, `FillOutput.mask`, and multi-layer background knockouts (`below.difference(&out.mask)`).
+- **Per-pattern sheets (`examples/gallery/<slug>.svg`)**: One SVG per pattern showing 3 density/angle rows across 4 columns (`square (unfrayed)`, `ring + hole (unfrayed)`, `frayed (with guide)`, and `frayed (ink only)`).
+- **[`cad.svg`](examples/gallery/cad.svg), [`custom.svg`](examples/gallery/custom.svg), [`dither.svg`](examples/gallery/dither.svg), [`placement.svg`](examples/gallery/placement.svg)**: Dedicated sheets for `.pat` hatches, custom functions, dithering algorithms, and CSS-style placement.
 
-```python
-gradient = penfill.stipple_field(shape, 0.6, 3.0, lambda x, y: x / 80)
-```
-
-**An SVG, repeated as a tile.** `svg_tile` reads paths (lines, cubic and
-quadratic curves), lines, polylines, polygons, rectangles, circles and
-ellipses, with nested transforms. It scales the drawing to a tile `width` mm
-wide, shifts every other row by `row_shift` tiles, turns the pattern and
-clips it.
-
-```python
-flower = open("flower.svg").read()
-strokes = penfill.svg_tile(shape, flower, 9.0, angle=15, row_shift=0.5)
-```
-
-**An SVG, placed like a CSS background.** `svg_fill` takes the same `size`,
-`position` and `repeat` as `dither` ([see above](#placing-a-picture-size-position-repeat)).
-
-**An SVG, clipped as is.** Read its lines with `svg_strokes`, scaled to a
-width, and cut them with `region.clip`. `clip` works on any strokes, including
-ones you generated yourself.
-
-```python
-strokes = shape.clip(penfill.svg_strokes(flower, width=60))
-```
-
-**A tile of your own strokes.** `tile(region, strokes, width, height, angle=0, row_shift=0)` repeats any polylines drawn in a `width × height` box, like
-wallpaper.
-
-## Any shape
-
-![One concentric fill on a square, a doughnut, a blob, a star and a shape in two separate parts](docs/img/shapes.svg)
-
-Holes, sharp spikes, thin necks and shapes in several separate parts are the
-normal case, not an edge case. The gallery draws every fill on these five
-shapes.
-
-## Gallery
-
-[`examples/gallery/`](examples/gallery) has one SVG per fill, showing it at
-several angles or spacings on every test shape, and
-[`gallery.svg`](examples/gallery/gallery.svg) puts them all side by side.
-[`cad.svg`](examples/gallery/cad.svg) shows every built-in `.pat` pattern and
-[`custom.svg`](examples/gallery/custom.svg) custom and composable fills, and
-[`dither.svg`](examples/gallery/dither.svg) every dither method as dots and
-as lines, and [`placement.svg`](examples/gallery/placement.svg) the main
-`size`/`position`/`repeat` cases on a picture and on an SVG.
+---
 
 ## Development
 
 ```
-src/               the Rust engine (the `penfill` crate)
-bindings/python/   PyO3 module, built with maturin
-bindings/node/     napi-rs addon
-examples/gallery.rs  draws the gallery and the pictures in this README
+src/                 Rust core crate (`penfill`)
+bindings/python/     PyO3 module (`penfill-python`), built with maturin
+bindings/node/       napi-rs addon (`penfill-node`)
+bindings/wasm/       wasm-bindgen crate (`penfill-wasm`) for the web playground
+examples/gallery.rs  Generates `examples/gallery/*.svg` and `docs/img/*.svg`
+docs/architecture/   Subsystem architecture documentation (start at INDEX.md)
 ```
 
 ```sh
-cargo test --package penfill                           # engine
-cargo run --release --example gallery                  # gallery + README images
+cargo test --package penfill                           # run all unit + doc tests
+cargo run --release --example gallery                  # regenerate gallery + README SVGs
 
 cd bindings/python && maturin develop --release && pytest
 cd bindings/node && npm install && npm run build && npm test
 ```
-
-GitHub Actions runs the Rust, Python, Node and WebAssembly test suites on
-every push and pull request. A `v*` tag builds release artifacts for GitHub
-and publishes the **`penfill`** crate to [crates.io](https://crates.io/crates/penfill)
-(`CARGO_REGISTRY_TOKEN` in repo secrets). PyPI and npm publish stay off for
-now (see `.github/workflows/release.yml` and [docs/RELEASE.md](docs/RELEASE.md)).
 
 ### Browser playground (WebAssembly)
 
@@ -559,37 +506,6 @@ now (see `.github/workflows/release.yml` and [docs/RELEASE.md](docs/RELEASE.md))
 cd web && npm install && npm run dev
 ```
 
-See [web/README.md](web/README.md).
+## License
 
-## Roadmap
-
-- [x] Geometry kernel (i_overlay regions, insets, clipping)
-- [x] Slicer fills: zigzag, rectilinear, grid, triangles, concentric, spiral
-- [x] Lattices, scatter, materials and `.pat` hatch patterns
-- [x] Custom fills: isolines, profiles, stroke tiles, SVG tiles and clipping
-- [x] Extensible patterns (`pattern`, same architecture as the built-in fills)
-- [x] Pictures: ordered, halftone and error-diffusion dithering, as dots or lines
-- [x] Pictures and SVGs placed like a CSS background (`size`, `position`, `repeat`)
-- [x] Python and Node bindings, CI and release workflows
-- [x] WebAssembly build and browser playground (`web/`, `./scripts/build-wasm.sh`)
-- [x] crates.io (`cargo add penfill` after the first `v*` tag publish)
-- [ ] PyPI and npm (deferred)
-- [x] Hilbert curve fill (`hilbert`)
-- [ ] More space-filling paths (Peano, Gosper, …)
-- [ ] Houndstooth, Greek key, seigaiha
-- [ ] Pictures as hatching whose spacing or line width follows the tone
-
-## Lineage and license
-
-penfill grew out of postcards, which draws map postcards on a pen plotter;
-dots and waves come from there. Everything else, including the built-in
-`.pat` definitions, was written for penfill.
-
-The line fills, zigzag, concentric and spiral are standard techniques
-(scanline polygon filling, boustrophedon paths, offset contours). penfill's
-implementation of them was written from a specification of their behaviour,
-[docs/clean-room/spec.md](docs/clean-room/spec.md), without reference to any
-slicer's source.
-
-penfill is licensed under either of [MIT](LICENSE-MIT) or
-[Apache-2.0](LICENSE-APACHE), at your option.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.

@@ -7,8 +7,10 @@
 //! Visual target: `drawland/docs/architecture/img/isoline-blob-fills/`.
 
 use crate::field::{fill_isolines, levels_every};
+use crate::fray::fray_strokes;
 use crate::geo::{Pt, Region, Strokes};
 use crate::noise::Perlin;
+use crate::pattern::{EdgeMode, FillOutput, FillParams};
 
 /// Linework plus mask geometry for occlusion: the lowest contour's closed
 /// loops (the overall silhouette), not every nested ring.
@@ -16,6 +18,24 @@ use crate::noise::Perlin;
 pub struct FillWithCoverage {
     pub strokes: Strokes,
     pub coverage: Region,
+}
+
+impl From<FillWithCoverage> for FillOutput {
+    fn from(v: FillWithCoverage) -> Self {
+        FillOutput {
+            strokes: v.strokes,
+            mask: v.coverage,
+        }
+    }
+}
+
+impl From<FillOutput> for FillWithCoverage {
+    fn from(v: FillOutput) -> Self {
+        FillWithCoverage {
+            strokes: v.strokes,
+            coverage: v.mask,
+        }
+    }
 }
 
 /// A known position that raises the field locally — a real tree, a cloud
@@ -59,6 +79,10 @@ pub struct IsolineFieldParams {
     /// Raising it shrinks coverage down to just the tallest peaks; lowering
     /// it grows and fuses clusters into fewer, bigger connected masses.
     pub threshold: f64,
+    /// Boundary mode (`Clip`, `Inside`, or `Overflow(mm)`).
+    pub edge: EdgeMode,
+    /// Smooth perimeter disappearing band in mm (`0.0` = off).
+    pub fray: f64,
 }
 
 impl Default for IsolineFieldParams {
@@ -70,6 +94,8 @@ impl Default for IsolineFieldParams {
             contour_spacing: 0.5,
             warp: 0.45,
             threshold: 0.25,
+            edge: EdgeMode::Clip,
+            fray: 0.0,
         }
     }
 }
@@ -89,11 +115,28 @@ pub fn fill_isoline_blobs(region: &Region, feature_size: f64, contour_spacing: f
     fill_isoline_blobs_with_coverage(region, &default_params(feature_size, contour_spacing, seed)).strokes
 }
 
+/// Standardized entry point from [`FillParams`] (where `params.spacing` is the
+/// contour spacing and `feature_size` scales proportionally).
+pub fn fill_isoline_blobs_params(region: &Region, params: &FillParams) -> FillOutput {
+    let target = params.resolve_region(region, 0.0);
+    let contour_spacing = params.spacing.max(0.05);
+    let feature_size = (contour_spacing * 16.0).max(4.0);
+    let mut p = default_params(feature_size, contour_spacing, params.seed);
+    p.edge = params.edge;
+    p.fray = params.fray;
+    fill_isoline_blobs_with_coverage(&target, &p).into()
+}
+
 pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams) -> FillWithCoverage {
     if region.is_empty() || p.contour_spacing <= 0.0 {
         return FillWithCoverage::default();
     }
     let feature = p.feature_size.max(1e-6);
+    let limit = match p.edge {
+        EdgeMode::Overflow(m) if m > 0.0 => region.outset(m),
+        _ => region.clone(),
+    };
+    let fade_band = (feature * 0.35).max(p.contour_spacing * 3.0);
 
     let ambient = Perlin::new(p.seed);
     let warp_x = Perlin::new(p.seed.wrapping_add(101));
@@ -106,9 +149,6 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
         FieldSource::Sites(s) | FieldSource::NoiseAndSites(s) => s,
     };
 
-    // One field over the whole page: marching squares merges basins that
-    // overlap above `threshold` into one closed loop automatically, which
-    // is what makes neighbouring masses fuse instead of stamping apart.
     let field = |pt: Pt| -> f64 {
         let (wx, wy) = if warp_amt > 0.0 {
             let u = pt.0 / feature;
@@ -130,6 +170,17 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
             let dy = (pt.1 - s.at.1) / r;
             h += s.weight * (-(dx * dx + dy * dy)).exp();
         }
+        if matches!(p.edge, EdgeMode::Inside | EdgeMode::Overflow(_)) {
+            if !limit.covers_point(pt) {
+                return p.threshold - 1.0;
+            }
+            let d = limit.dist_to_boundary(pt);
+            if d < fade_band {
+                let t = (d / fade_band).clamp(0.0, 1.0);
+                let s = t * t * (3.0 - 2.0 * t);
+                h = (p.threshold - 0.5) + (h - (p.threshold - 0.5)) * s;
+            }
+        }
         h
     };
 
@@ -138,22 +189,23 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
         return FillWithCoverage::default();
     }
 
-    // Field changes about 1.0 (ambient's own range) over `feature` mm, so a
-    // step of `contour_spacing / feature` field-units lands rings roughly
-    // `contour_spacing` mm apart in ink.
     let level_step = (p.contour_spacing / feature).clamp(0.01, 0.5);
     let levels = levels_every(p.threshold, max_level, level_step);
     let cell = (p.contour_spacing * 0.3).min(feature * 0.12).clamp(0.04, 0.4);
 
-    let strokes = fill_isolines(region, cell, &levels, &field);
-    let coverage = coverage_from_threshold(region, cell, p.threshold, &field);
+    let raw_strokes = fill_isolines(&limit, cell, &levels, &field);
+    let strokes = if p.fray > 0.0 {
+        fray_strokes(&limit, raw_strokes, p.contour_spacing, p.fray, p.seed)
+    } else {
+        raw_strokes
+    };
+    let coverage = coverage_from_threshold(&limit, cell, p.threshold, &field);
 
     FillWithCoverage { strokes, coverage }
 }
 
 /// The silhouette: closed loops of the lowest ("ink begins") contour,
-/// unioned as one region. Open chains (the field only dips below threshold
-/// at the region's own edge) are dropped — they don't bound a fillable area.
+/// unioned as one region.
 fn coverage_from_threshold(region: &Region, cell: f64, threshold: f64, field: &impl Fn(Pt) -> f64) -> Region {
     let loops = fill_isolines(region, cell, &[threshold], field);
     let polys: Vec<Vec<Vec<Pt>>> =
@@ -195,8 +247,6 @@ mod tests {
         let low_out = fill_isoline_blobs_with_coverage(&square(), &low);
         let high_out = fill_isoline_blobs_with_coverage(&square(), &high);
         let area = |r: &Region| r.all_rings_mm().len();
-        // Lower threshold should never produce less coverage structure than
-        // a much higher one on the same field.
         assert!(area(&low_out.coverage) >= area(&high_out.coverage));
     }
 
@@ -212,10 +262,10 @@ mod tests {
             contour_spacing: 0.5,
             warp: 0.1,
             threshold: 0.2,
+            ..Default::default()
         };
         let out = fill_isoline_blobs_with_coverage(&square(), &p);
         assert!(!out.coverage.is_empty());
-        // Far enough overlap that the silhouette is one connected loop, not two.
         assert_eq!(out.coverage.all_rings_mm().len(), 1, "sites should fuse at this spacing");
     }
 
@@ -231,6 +281,7 @@ mod tests {
             contour_spacing: 0.5,
             warp: 0.1,
             threshold: 0.2,
+            ..Default::default()
         };
         let out = fill_isoline_blobs_with_coverage(&square(), &p);
         assert_eq!(out.coverage.all_rings_mm().len(), 2);

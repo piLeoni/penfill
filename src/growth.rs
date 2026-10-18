@@ -67,6 +67,10 @@ pub struct GrowthParams {
     /// twig spacing). 0 is uniform; 1 spreads from small saplings to
     /// large crowns.
     pub variation: f64,
+    /// Boundary mode (`Clip`, `Inside`, or `Overflow(mm)`).
+    pub edge: crate::pattern::EdgeMode,
+    /// Smooth perimeter disappearing band in mm (`0.0` = off).
+    pub fray: f64,
 }
 
 impl Default for GrowthParams {
@@ -86,6 +90,8 @@ impl Default for GrowthParams {
             smooth: 2,
             coverage: 1.0,
             variation: 0.35,
+            edge: crate::pattern::EdgeMode::Clip,
+            fray: 0.0,
         }
     }
 }
@@ -250,6 +256,26 @@ fn generate_roots(region: &Region, source: &RootSource, seed: u64, variation: f6
 
 pub fn fill_growth(region: &Region, p: &GrowthParams) -> Strokes {
     fill_growth_with_coverage(region, p).strokes
+}
+
+/// Standardized entry point from [`FillParams`].
+pub fn fill_growth_params(
+    region: &Region,
+    params: &crate::pattern::FillParams,
+) -> crate::pattern::FillOutput {
+    let target = params.resolve_region(region, 0.0);
+    let spacing = params.spacing.max(0.2);
+    let p = GrowthParams {
+        seed: params.seed,
+        spacing,
+        step: (spacing * 0.4).clamp(0.1, 1.5),
+        reach: (spacing * 8.0).max(2.0),
+        kill: spacing.max(0.2),
+        edge: params.edge,
+        fray: params.fray,
+        ..Default::default()
+    };
+    fill_growth_with_coverage(&target, &p).into()
 }
 
 /// The fill and its footprint: the union of the trees' cells, so a host can
@@ -521,7 +547,19 @@ pub fn fill_growth_with_coverage(region: &Region, p: &GrowthParams) -> crate::Fi
             }
         }
     }
-    crate::FillWithCoverage { strokes: region.clip_strokes(&strokes), coverage: footprint }
+    let limit = match p.edge {
+        crate::pattern::EdgeMode::Overflow(m) if m > 0.0 => region.outset(m),
+        _ => region.clone(),
+    };
+    let final_strokes = if p.fray > 0.0 {
+        crate::fray::fray_strokes(&limit, strokes, p.spacing, p.fray, p.seed)
+    } else {
+        limit.clip_strokes(&strokes)
+    };
+    crate::FillWithCoverage {
+        strokes: final_strokes,
+        coverage: footprint.intersection(&limit),
+    }
 }
 
 /// The tree as polylines of node indices: each path follows its heaviest

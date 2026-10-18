@@ -21,20 +21,28 @@ is unavailable there; the profile sets `opt-level = "s"` for size.
 - **Python** (`bindings/python/src/lib.rs`): points come in as any sequence of
   `(x, y)` pairs (tuples, lists, numpy rows), go out as lists of `(x, y)`
   tuples. `Region` is a `#[pyclass]` (frozen, `Clone`) wrapping
-  `CoreRegion`. Stubs in `penfill.pyi`; tests in `tests/` (pure Python, no
-  Rust build) plus `test_plot_sheet.py` for the tool.
+  `CoreRegion`; `FillOutput` wraps `{ strokes, mask: Region }` (and supports
+  unpacking `strokes, mask = out`). Exposes `fill(region, name, ...)` and
+  `fill_output(region, name, ...)` over `FILLS` alongside dedicated per-pattern
+  functions, all supporting `inset`, `edge` (`"clip"`, `"inside"`,
+  `("overflow", mm)`), `fray`, and `with_mask`. Stubs in `penfill.pyi`.
 - **Node** (`bindings/node/src/lib.rs`): points are `[x, y]` arrays, strokes
   are arrays of points, all mm. Required parameters are positional; the rest
-  go in an options object. Types in `index.d.ts`.
+  go in `FillOptions` (`angle`, `seed`, `inset`, `edge`, `overflow`, `fray`,
+  `anchor`, `shift`). Exposes `fill`, `fillOutput`, `fills()`, `pattern`,
+  `patternOutput`, and dedicated fill functions. Types in `index.d.ts`.
 - **wasm** (`bindings/wasm/src/lib.rs`): minimal surface, rings as flat
-  `[x0, y0, x1, y1, …]` arrays, **SVG out** — it exists to drive the web
-  playground. Consumed by `web/` (Vite + React; `usePenfill.ts`).
+  `[x0, y0, x1, y1, …]` arrays, **SVG out** — delegates directly to
+  `penfill::fill_by_name` and `penfill::all_fill_names()`, supporting `inset`,
+  `fray`, and `edge` parameters. Consumed by `web/` (Vite + React).
 
 ## Adding a fill to a binding
 
-A new core fill is not automatically exposed. Each binding lists its API by
-hand; add the wrapper in every binding that should carry it, and add a stub /
-type. Keep the wrapper free of logic — call the core, translate types.
+Registering a new fill in `src/pattern.rs` (`FILL_NAMES` and `fill_named`)
+automatically makes it available in `fill` / `fill_output` (Python), `fill` /
+`fillOutput` / `fills()` (Node), and `render` / `fillNames()` (wasm). Dedicated
+top-level convenience wrappers can also be added to `bindings/python/src/lib.rs`
+(`penfill.pyi`) and `bindings/node/src/lib.rs` (`index.d.ts`).
 
 ## Release
 

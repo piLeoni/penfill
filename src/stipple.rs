@@ -19,8 +19,9 @@ pub fn fill_stipple(region: &Region, spacing: f64, mark: f64, seed: u64) -> Stro
 }
 
 /// Dots whose density follows `field`: where it is 0 they are `dense` mm
-/// apart, where it is 1 they are `sparse` mm apart, in between the ink
-/// per area blends evenly (so a linear field reads as a linear gradient).
+/// apart, where it is 1 they are `sparse` mm apart (either may be larger),
+/// in between the ink per area blends evenly (so a linear field reads as a
+/// linear gradient).
 pub fn fill_stipple_field(
     region: &Region,
     dense: f64,
@@ -29,7 +30,7 @@ pub fn fill_stipple_field(
     seed: u64,
     field: impl Fn(Pt) -> f64,
 ) -> Strokes {
-    if dense <= 0.0 || sparse < dense || region.is_empty() {
+    if dense <= 0.0 || sparse <= 0.0 || region.is_empty() {
         return vec![];
     }
     marks(scatter_field(&region.inset(mark / 2.0), dense, sparse, seed, field), mark, seed)
@@ -37,18 +38,20 @@ pub fn fill_stipple_field(
 
 /// The points under [`fill_stipple_field`], before any mark is drawn:
 /// random, no two closer than the local spacing, which runs from `dense`
-/// where `field` is 0 to `sparse` where it is 1 (NaN reads as 1).
+/// where `field` is 0 to `sparse` where it is 1 (either may be larger;
+/// NaN reads as 1).
 pub fn scatter_field(region: &Region, dense: f64, sparse: f64, seed: u64, field: impl Fn(Pt) -> f64) -> Vec<Pt> {
-    if dense <= 0.0 || sparse < dense || region.is_empty() {
+    if dense <= 0.0 || sparse <= 0.0 || region.is_empty() {
         return vec![];
     }
+    let (r_min, r_max) = (dense.min(sparse), dense.max(sparse));
     let (a, b) = (1.0 / (dense * dense), 1.0 / (sparse * sparse));
     let radius = |p: Pt| {
         let t = field(p);
         let t = if t.is_nan() { 1.0 } else { t.clamp(0.0, 1.0) };
-        1.0 / (a + t * (b - a)).sqrt()
+        1.0 / (a + t * (b - a)).max(1e-12).sqrt()
     };
-    poisson_disk_varying(region, dense, sparse, radius, seed)
+    poisson_disk_varying(region, r_min, r_max, radius, seed)
 }
 
 /// Clouds: density drifts with Perlin noise whose blobs are about

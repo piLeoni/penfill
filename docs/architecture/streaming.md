@@ -27,6 +27,8 @@ exactly the ones the one-shot version produces, emitted earlier.
 - `impl Sink for &mut S` — forwarding.
 - `Clipped<'a, S>` — clips each stroke to a region as it arrives, so the
   generator's raw geometry never lingers.
+- `Frayed<'a, S>` — clips and applies perimeter edge fraying (`fray` mm) to each
+  stroke as it arrives, matching `fray_strokes` (`frayed_sink_matches_fray_strokes`).
 - `Meter { strokes, points }` — the cheap probe: counts without keeping.
 - `meter(region, fill)` — estimate a fill's stroke count before running it.
 - `row_batches(count, batch)` — split a row span into `(start, end)` pairs,

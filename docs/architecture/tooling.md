@@ -5,31 +5,52 @@ is part of the library's public Rust API.
 
 ## Gallery sheets — `examples/gallery.rs`
 
-One SVG per pattern (`examples/gallery/<pattern>.svg`), plus `gallery.svg`,
-the comparison table. Vector, so lines stay sharp when zoomed. These are the
-images the README links.
+`cargo run --example gallery --release` (requires the `image` feature) generates
+the complete vector reference gallery in `examples/gallery/*.svg` and the
+README illustration strips in `docs/img/*.svg`.
 
-- `cargo run --example gallery --release` regenerates them. The example
-  requires the `image` feature (`[[example]] required-features = ["image"]` in
-  `Cargo.toml`).
-- Three styles, each pairing a spacing with an angle: `FINE_MM = 0.8`,
-  `MID_MM = 1.6`, `COARSE_MM = 2.8`; border is half the spacing so the coarse
-  row sits further off the wall. Angle steps are 0 / +20 / +45 — a hex grid
-  repeats every 60°, so 60° and 90° would just redraw the rows above.
-- `const SEED: u64 = 7` so the scattered fills don't change between runs.
-- Shapes (`shapes()`): square, doughnut, blob, star, and a deliberately
-  awkward "worst" outline to stress the fills.
-- Palette (`PAPER`, `WALL`, `INK`, `LABEL`) is chosen to read in print without
-  primary colours.
-- The full fill surface is imported at the top of the file — this example is
-  also the crate's broadest compile-time integration test of the public API.
+### Declarative catalog (`catalog()`)
 
-The `examples/gallery/*.svg` and `docs/img/*.svg` outputs are committed for
-the README; regenerate them when a fill's geometry changes.
+Instead of per-pattern closures, `examples/gallery.rs` defines a compact
+declarative table (`catalog() -> Vec<Pattern>`) covering all 99 catalog entries
+grouped into 8 `Category` families (`Lines`, `Lattices`, `Scatter`, `Materials`,
+`Organic`, `Geology`, `Ground`, `Cad`). Rendering dispatches through
+`penfill::fill_by_name` and `penfill::fill_output_by_name` using `FillParams`.
+
+### Clean test shapes (`gallery_shapes()`)
+
+All gallery sheets and README strips use smooth, generous `52 × 52 mm` test
+geometries so patterns read clearly without spiky polygon artifacts:
+- `square` — `52 × 52 mm` square
+- `card` — `52 × 52 mm` rounded rectangle (`r = 5 mm`, 64 vertices)
+- `ring` — smooth 96-vertex circular ring (`R = 26 mm`) with a 64-vertex inner hole (`r = 9 mm`)
+- `island` — smooth 96-vertex harmonic island contour (`R ≈ 25 mm`)
+- `pond_island` — smooth organic island with an interior pond hole
+- `star` — clean 5-pointed star (`R = 27 mm`, `r = 13.5 mm`)
+- `archipelago` — two-island multi-polygon region with a hole
+
+### Generated sheets (`examples/gallery/`)
+
+1. **Per-pattern sheets (`examples/gallery/<slug>.svg`)**:
+   - 3 rows (`0.9 mm`, `1.6 mm`, `2.6 mm`, paired with `0° / +20° / +45°` for angled fills)
+   - 4 columns:
+     1. `square (unfrayed)` — solid wall border
+     2. `ring + hole (unfrayed)` — solid wall border around outer ring and hole
+     3. `frayed (with guide)` — organic island with `fray = 8.5 mm` and a dashed boundary guide
+     4. `frayed (ink only)` — the same frayed fill with no boundary line, floating on paper
+2. **Categorized visual reference (`examples/gallery/gallery.svg`)**:
+   - Vertical 7-column poster grouped by `Category`, showing each pattern side-by-side on a crisp square and on a frayed organic contour (`fray = 8.5 mm`) with its name and description underneath.
+3. **Alphabetical index (`examples/gallery/all-patterns.svg`)**:
+   - 10-column alphabetical grid of all 99 catalog patterns.
+4. **Universal edge fraying showcase (`examples/gallery/fray.svg`)**:
+   - Compares `fray = 0 mm`, `fray = 4.5 mm`, `fray = 9.0 mm (with guide)`, and `fray = 9.0 mm (ink only)` across 12 patterns spanning continuous lines, flow streamlines, discrete marks, botanicals, and closed Voronoi cells.
+5. **Boundary modes & polygon masks showcase (`examples/gallery/edges-and-masks.svg`)**:
+   - Compares `EdgeMode::Clip`, `EdgeMode::Inside`, `EdgeMode::Overflow(3.5)`, `FillOutput.mask` polygon silhouettes, and multi-layer background knockouts (`below.difference(&out.mask)`).
+6. **Specialized sheets (`cad.svg`, `custom.svg`, `dither.svg`, `placement.svg`)** and **README strips (`docs/img/*.svg`)**.
 
 ## Plot-sheet tool — `tools/plot_sheet.py`
 
-Draws a page of penfill patterns side by side into one SVG, ready for a pen
+Draws a page of `penfill` patterns side by side into one SVG, ready for a pen
 plotter; each pattern gets a labelled rectangle. Uses the **Python binding**,
 all units mm.
 

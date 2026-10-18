@@ -97,15 +97,15 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage` | flat: contours of one 2D noise field; returns mask `coverage` — see [isoline-blob-fills.md](isoline-blob-fills.md) |
-| `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage` | 3D: crowns of metaball spheres cut into slices, upper slices hide lower ones (overhang); `EdgeMode::{Clip, Inside, Overflow(mm)}` |
+| `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage`, `fill_isoline_blobs_params` | flat: contours of one 2D noise/metaball field; supports `EdgeMode`, `fray`, and `FillOutput` mask — see [isoline-blob-fills.md](isoline-blob-fills.md) |
+| `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage`, `fill_isoline_stack_params` | 3D: crowns of metaball spheres cut into slices, upper slices hide lower ones (overhang); `EdgeMode::{Clip, Inside, Overflow(mm)}`, `fray`, and `FillOutput` |
 
 ## Texture (built on `field.rs` and flow/Voronoi)
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `textures.rs` | `fill_marble`, `fill_wood`, `fill_cracks`, `fill_cell_net(_frayed)`, `fill_eddies(_frayed)`, `fill_ripples(_frayed)`, `fill_swells(_frayed)` | contour lines, flow streamlines, overlapping swells, and cellular nets |
-| `fray.rs` | `whole_at`, `fray_strokes` | perimeter-aware edge fraying: survival weight from `Region::dist_to_boundary` + Perlin wobble breaks strokes into progressively shorter dashes/dots before the boundary |
+| `textures.rs` | `fill_marble`, `fill_wood`, `fill_cracks`, `fill_cell_net(_frayed)`, `fill_eddies(_frayed)`, `fill_ripples(_frayed)`, `fill_swells(_frayed)`, `fill_*_params` | contour lines, flow streamlines, overlapping swells, and cellular nets built on `Canvas` + `Tools` |
+| `fray.rs` | `whole_at`, `border_ramp`, `fray_strokes`, `fray_strokes_into`, `smooth` | universal geometry-adaptive perimeter fraying: (1) continuous polylines erode into shorter dashes/dots before disappearing, (2) short discrete marks/dots thin out and shrink around their midpoint, and (3) small closed rings/cells scale toward their centroid and break open near the border |
 
 - Marble: veins at `angle`, domain-warped twice (slow drift + folded ripple),
   each vein drawn as its two edges so it pinches and swells. Sampled finer

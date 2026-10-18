@@ -1,186 +1,158 @@
-//! Natural textures drawn as contour lines of a noise-driven field
-//! (`field::fill_isolines`): marble veins, wood grain, cracked ground.
+//! Natural textures drawn as contour lines of a noise-driven field, flow
+//! streamlines, and cellular Voronoi nets: marble veins, wood grain, cracked
+//! ground, cell nets, eddies, swells, and ripples — built on [`Canvas`] and
+//! [`Tools`].
 
-use crate::field::{fill_isolines, levels_every};
 use crate::anchor::{centre, Anchor, Frame};
+use crate::concentric::signed_area;
+use crate::field::levels_every;
 use crate::fray::{fray_strokes, whole_at};
 use crate::geo::{Pt, Region, Strokes};
 use crate::noise::Perlin;
+use crate::pattern::{fill_pattern_output, Canvas, EdgeMode, FillOutput, FillParams, Tools};
 use crate::random::{poisson_disk, Rng};
 
 /// Marble: veins that drift across the slab at `angle`, about `spacing` mm
 /// apart, warped by turbulence. Each vein is drawn as its two edges, so it
 /// pinches and swells like a real one.
 pub fn fill_marble(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: Anchor) -> Strokes {
-    if spacing <= 0.0 || region.is_empty() {
-        return vec![];
+    fill_marble_params(
+        region,
+        &FillParams::new(spacing).angle(angle).seed(seed).anchor(anchor),
+    )
+    .strokes
+}
+
+pub fn fill_marble_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
     }
-    let noise = Perlin::new(seed);
-    let thick = Perlin::new(seed.wrapping_add(1));
-    let (sin, cos) = angle.to_radians().sin_cos();
+    fill_pattern_output(region, params, draw_marble)
+}
+
+pub(crate) fn draw_marble(canvas: &Canvas, tools: &Tools) -> Strokes {
+    let spacing = canvas.spacing;
+    let thick = Perlin::new(canvas.seed.wrapping_add(1));
+    let (sin, cos) = canvas.angle.to_radians().sin_cos();
     let warp = spacing * 1.2;
-    // The veins are a field over the page; the anchor moves the field.
-    let at = anchor.resolve((0.0, 0.0));
+    let at = canvas.anchor.resolve((0.0, 0.0));
     let f = |p: Pt| {
         let p = (p.0 - at.0, p.1 - at.1);
         let across = -p.0 * sin + p.1 * cos;
         let (u, v) = (p.0 / (spacing * 4.0), p.1 / (spacing * 4.0));
-        // Domain warp twice: slow drift, then a folded ripple on top.
-        let w1 = noise.fbm(u, v, 3);
-        let w2 = noise.fbm(u * 2.0 + 5.2 * w1, v * 2.0 - 3.1 * w1, 2);
+        let w1 = tools.noise(u, v, 3);
+        let w2 = tools.noise(u * 2.0 + 5.2 * w1, v * 2.0 - 3.1 * w1, 2);
         let g = across + warp * (w1 + 0.35 * w2);
-        // Veins swell and thin along their length, never vanishing.
         let t = 0.5 + 0.5 * thick.noise(u * 0.8 + 9.0, v * 0.8);
         (std::f64::consts::PI * g / spacing).sin().abs() - (0.1 + 0.14 * t)
     };
-    // Sampled finer than the thinnest vein, or it breaks into dashes.
-    fill_isolines(region, (spacing / 25.0).clamp(0.05, 0.3), &[0.0], f)
+    tools
+        .on(&canvas.limit)
+        .isolines((spacing / 25.0).clamp(0.05, 0.3), &[0.0], f)
 }
 
 /// Wood grain: long lines `spacing` mm apart running along `angle`,
 /// wandering slowly, with a few knots the grain flows around.
-/// The grain is a field over the page, moved by the anchor; the knots are
-/// placed inside each board.
 pub fn fill_wood(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: Anchor) -> Strokes {
-    if spacing <= 0.0 || region.is_empty() {
-        return vec![];
+    fill_wood_params(
+        region,
+        &FillParams::new(spacing).angle(angle).seed(seed).anchor(anchor),
+    )
+    .strokes
+}
+
+pub fn fill_wood_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
     }
-    let noise = Perlin::new(seed);
-    let (minx, miny, maxx, maxy) = region.bounds_mm();
+    fill_pattern_output(region, params, draw_wood)
+}
+
+pub(crate) fn draw_wood(canvas: &Canvas, tools: &Tools) -> Strokes {
+    let spacing = canvas.spacing;
+    let (minx, miny, maxx, maxy) = canvas.bounds;
     let area = (maxx - minx) * (maxy - miny);
-    let mut rng = Rng::new(seed.wrapping_add(9));
-    // About one knot per 900 mm², at least one.
+    let mut rng = tools.rng_salted(9);
     let n_knots = ((area / 900.0).round() as usize).max(1);
-    // Knots sit inside the board: one just outside the wall only crowds
-    // the grain into a dark wedge along the edge.
     let knots: Vec<(Pt, f64)> = (0..n_knots)
         .filter_map(|_| {
-            // Knot size is about the board, not the line spacing: at fine
-            // spacing a spacing-sized knot is a black blot.
             let r = spacing + rng.range(2.5, 5.0);
-            let inner = region.inset(r);
+            let inner = canvas.region.inset(r);
             (0..50)
                 .map(|_| (rng.range(minx, maxx), rng.range(miny, maxy)))
                 .find(|&c| inner.covers_point(c))
                 .map(|c| (c, r))
         })
         .collect();
-    let (sin, cos) = angle.to_radians().sin_cos();
-    let at = anchor.resolve((0.0, 0.0));
+    let (sin, cos) = canvas.angle.to_radians().sin_cos();
+    let at = canvas.anchor.resolve((0.0, 0.0));
     let f = |p: Pt| {
         let (along, across) = {
             let q = (p.0 - at.0, p.1 - at.1);
             (q.0 * cos + q.1 * sin, -q.0 * sin + q.1 * cos)
         };
-        let mut g = across + spacing * 2.0 * noise.fbm(along / (spacing * 25.0), across / (spacing * 6.0), 3);
+        let mut g = across + spacing * 2.0 * tools.noise(along / (spacing * 25.0), across / (spacing * 6.0), 3);
         for &(k, r) in &knots {
             let d2 = ((p.0 - k.0).powi(2) + (p.1 - k.1).powi(2)) / (r * r);
-            // Just past the height that closes rings around the core;
-            // higher, the grain on the knot's flanks crowds into a blot.
             g += 1.3 * r * (-d2).exp();
         }
         g
     };
     let reach = (maxx - minx).hypot(maxy - miny) + spacing * 20.0;
-    fill_isolines(region, (spacing / 8.0).clamp(0.08, 0.4), &levels_every(-reach, reach, spacing), f)
+    tools.on(&canvas.limit).isolines(
+        (spacing / 8.0).clamp(0.08, 0.4),
+        &levels_every(-reach, reach, spacing),
+        f,
+    )
 }
 
 /// Parched ground / mud cracks: rounded Voronoi cells with wide gaps between
 /// them — a cellular tile like dry desert earth. `spacing` is roughly the
 /// cell size in mm.
 pub fn fill_cracks(region: &Region, spacing: f64, seed: u64) -> Strokes {
-    if spacing <= 0.0 || region.is_empty() {
-        return vec![];
+    fill_cracks_params(region, &FillParams::new(spacing).seed(seed)).strokes
+}
+
+pub fn fill_cracks_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
     }
-    use crate::concentric::signed_area;
-    let field = region.outset(spacing);
-    let centres = poisson_disk(&field, spacing * 0.92, seed);
-    let mut rng = Rng::new(seed.wrapping_add(4));
-    let reach2 = (spacing * 2.5).powi(2);
+    fill_pattern_output(region, params, draw_cracks)
+}
+
+pub(crate) fn draw_cracks(canvas: &Canvas, tools: &Tools) -> Strokes {
+    let spacing = canvas.spacing;
+    let field = canvas.region.outset(spacing);
+    let centres = poisson_disk(&field, spacing * 0.92, canvas.seed);
+    let mut rng = tools.rng_salted(4);
     let gap = spacing * rng.range(0.14, 0.20);
     let corner = spacing * rng.range(0.22, 0.34);
     let min_area = 0.08 * spacing * spacing;
     let mut out: Strokes = Vec::new();
-    for (i, &c) in centres.iter().enumerate() {
-        let r = spacing * 2.0;
-        let mut cell = vec![(c.0 - r, c.1 - r), (c.0 + r, c.1 - r), (c.0 + r, c.1 + r), (c.0 - r, c.1 + r)];
-        for (j, &o) in centres.iter().enumerate() {
-            if i == j || (o.0 - c.0).powi(2) + (o.1 - c.1).powi(2) > reach2 {
-                continue;
-            }
-            cell = clip_half_plane(&cell, c, o);
-            if cell.len() < 3 {
-                break;
-            }
-        }
-        if cell.len() < 3 {
+    for (_, c, cell_ring) in tools.voronoi_cells(&centres, spacing * 2.5) {
+        if matches!(canvas.edge, EdgeMode::Overflow(_)) && !canvas.region.covers_point(c) {
             continue;
         }
-        let cell = Region::from_ring(&cell).intersection(region);
-        let area: f64 = cell.all_rings_mm().iter().map(|r| signed_area(r)).sum();
+        let cell = Region::from_ring(&cell_ring);
+        let base = match canvas.edge {
+            EdgeMode::Clip | EdgeMode::Inside => cell.intersection(canvas.region),
+            EdgeMode::Overflow(_) => cell.intersection(&canvas.limit),
+        };
+        let area: f64 = base.all_rings_mm().iter().map(|r| signed_area(r)).sum();
         if area < min_area {
             continue;
         }
-        let piece = cell.inset(gap + corner).outset(corner);
+        let piece = base.inset(gap + corner).outset(corner);
         for ring in piece.all_rings_mm() {
             if ring.len() < 3 || signed_area(&ring).abs() < min_area {
                 continue;
             }
+            tools.add_mask_ring(&ring);
             let mut closed = ring;
             if closed.first() != closed.last() {
                 closed.push(closed[0]);
             }
-            out.extend(region.clip_polyline(&closed));
-        }
-    }
-    out
-}
-
-/// Keep the part of `poly` closer to `c` than to `o`.
-fn clip_half_plane(poly: &[Pt], c: Pt, o: Pt) -> Vec<Pt> {
-    let m = ((c.0 + o.0) / 2.0, (c.1 + o.1) / 2.0);
-    let n = (o.0 - c.0, o.1 - c.1);
-    let side = |p: Pt| (p.0 - m.0) * n.0 + (p.1 - m.1) * n.1;
-    let mut out = Vec::new();
-    for i in 0..poly.len() {
-        let a = poly[i];
-        let b = poly[(i + 1) % poly.len()];
-        let (sa, sb) = (side(a), side(b));
-        if sa <= 0.0 {
-            out.push(a);
-        }
-        if (sa < 0.0 && sb > 0.0) || (sa > 0.0 && sb < 0.0) {
-            let t = sa / (sa - sb);
-            out.push((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)));
-        }
-    }
-    out
-}
-
-/// Keep the part of `poly` closer to `c` than to `o`, recording which
-/// neighbour (`Some(j)`) created each edge so shared Voronoi walls can be
-/// emitted once with organic kinks while keeping 3-way junctions exact.
-fn clip_half_plane_tagged(poly: &[(Pt, Option<usize>)], c: Pt, o: Pt, tag: usize) -> Vec<(Pt, Option<usize>)> {
-    let m = ((c.0 + o.0) / 2.0, (c.1 + o.1) / 2.0);
-    let n = (o.0 - c.0, o.1 - c.1);
-    let side = |p: Pt| (p.0 - m.0) * n.0 + (p.1 - m.1) * n.1;
-    let mut out = Vec::new();
-    let len = poly.len();
-    for i in 0..len {
-        let (a, tag_a) = poly[i];
-        let (b, _) = poly[(i + 1) % len];
-        let (sa, sb) = (side(a), side(b));
-        if sa <= 0.0 {
-            if sb <= 0.0 {
-                out.push((a, tag_a));
-            } else {
-                out.push((a, tag_a));
-                let t = sa / (sa - sb);
-                out.push(((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)), Some(tag)));
-            }
-        } else if sb <= 0.0 {
-            let t = sa / (sa - sb);
-            out.push(((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)), tag_a));
+            out.push(closed);
         }
     }
     out
@@ -191,17 +163,26 @@ fn clip_half_plane_tagged(poly: &[(Pt, Option<usize>)], c: Pt, o: Pt, tag: usize
 /// has 1–2 subtle angular kinks so cells look like hand-drawn irregular stone
 /// or parched-earth polygons.
 pub fn fill_cell_net(region: &Region, spacing: f64, seed: u64) -> Strokes {
-    fill_cell_net_frayed(region, spacing, seed, 0.0)
+    fill_cell_net_params(region, &FillParams::new(spacing).seed(seed)).strokes
 }
 
 /// [`fill_cell_net`] with optional perimeter-aware edge fraying (`fray` in mm).
 pub fn fill_cell_net_frayed(region: &Region, spacing: f64, seed: u64, fray: f64) -> Strokes {
-    if spacing <= 0.0 || region.is_empty() {
-        return vec![];
+    fill_cell_net_params(region, &FillParams::new(spacing).seed(seed).fray(fray)).strokes
+}
+
+pub fn fill_cell_net_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
     }
-    let field = region.outset(spacing * 1.6);
-    let mut rng = Rng::new(seed.wrapping_add(17));
-    let centres: Vec<Pt> = poisson_disk(&field, spacing * 0.88, seed)
+    fill_pattern_output(region, params, draw_cell_net)
+}
+
+pub(crate) fn draw_cell_net(canvas: &Canvas, tools: &Tools) -> Strokes {
+    let spacing = canvas.spacing;
+    let field = canvas.limit.outset(spacing * 1.6);
+    let mut rng = tools.rng_salted(17);
+    let centres: Vec<Pt> = poisson_disk(&field, spacing * 0.88, canvas.seed)
         .into_iter()
         .map(|c| {
             (
@@ -210,72 +191,43 @@ pub fn fill_cell_net_frayed(region: &Region, spacing: f64, seed: u64, fray: f64)
             )
         })
         .collect();
-    let reach2 = (spacing * 2.6).powi(2);
+
     let mut raw: Strokes = Vec::new();
-    for (i, &c) in centres.iter().enumerate() {
-        let r = spacing * 2.2;
-        let mut cell: Vec<(Pt, Option<usize>)> = vec![
-            ((c.0 - r, c.1 - r), None),
-            ((c.0 + r, c.1 - r), None),
-            ((c.0 + r, c.1 + r), None),
-            ((c.0 - r, c.1 + r), None),
-        ];
-        for (j, &o) in centres.iter().enumerate() {
-            if i == j || (o.0 - c.0).powi(2) + (o.1 - c.1).powi(2) > reach2 {
-                continue;
-            }
-            cell = clip_half_plane_tagged(&cell, c, o, j);
-            if cell.len() < 3 {
-                break;
-            }
-        }
-        if cell.len() < 3 {
+    for (i, j, a, b) in tools.voronoi_edges(&centres, spacing * 2.6) {
+        if matches!(canvas.edge, EdgeMode::Inside)
+            && (!canvas.region.covers_point(a) || !canvas.region.covers_point(b))
+        {
             continue;
         }
-        let n = cell.len();
-        for k in 0..n {
-            let (a, tag) = cell[k];
-            let (b, _) = cell[(k + 1) % n];
-            let Some(j) = tag else { continue };
-            if i >= j {
-                continue;
-            }
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let len = dx.hypot(dy);
-            if len < 1e-4 {
-                continue;
-            }
-            let mut erng = Rng::new(
-                seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                    ^ (j as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9),
-            );
-            let (nx, ny) = (-dy / len, dx / len);
-            let poly = if len >= spacing * 0.42 && erng.unit() < 0.65 {
-                let t1 = 0.34 + erng.range(-0.07, 0.07);
-                let t2 = 0.68 + erng.range(-0.07, 0.07);
-                let d1 = erng.range(-0.11, 0.11) * len;
-                let d2 = erng.range(-0.11, 0.11) * len;
-                vec![
-                    a,
-                    (a.0 + t1 * dx + d1 * nx, a.1 + t1 * dy + d1 * ny),
-                    (a.0 + t2 * dx + d2 * nx, a.1 + t2 * dy + d2 * ny),
-                    b,
-                ]
-            } else if len >= spacing * 0.20 {
-                let t = 0.5 + erng.range(-0.12, 0.12);
-                let d = erng.range(-0.12, 0.12) * len;
-                vec![a, (a.0 + t * dx + d * nx, a.1 + t * dy + d * ny), b]
-            } else {
-                vec![a, b]
-            };
-            raw.push(poly);
-        }
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len = dx.hypot(dy);
+        let mut erng = Rng::new(
+            canvas.seed
+                ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ (j as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9),
+        );
+        let (nx, ny) = (-dy / len, dx / len);
+        let poly = if len >= spacing * 0.42 && erng.unit() < 0.65 {
+            let t1 = 0.34 + erng.range(-0.07, 0.07);
+            let t2 = 0.68 + erng.range(-0.07, 0.07);
+            let d1 = erng.range(-0.11, 0.11) * len;
+            let d2 = erng.range(-0.11, 0.11) * len;
+            vec![
+                a,
+                (a.0 + t1 * dx + d1 * nx, a.1 + t1 * dy + d1 * ny),
+                (a.0 + t2 * dx + d2 * nx, a.1 + t2 * dy + d2 * ny),
+                b,
+            ]
+        } else if len >= spacing * 0.20 {
+            let t = 0.5 + erng.range(-0.12, 0.12);
+            let d = erng.range(-0.12, 0.12) * len;
+            vec![a, (a.0 + t * dx + d * nx, a.1 + t * dy + d * ny), b]
+        } else {
+            vec![a, b]
+        };
+        raw.push(poly);
     }
-    if fray > 0.0 {
-        fray_strokes(region, raw, spacing, fray, seed)
-    } else {
-        region.clip_strokes(&raw)
-    }
+    raw
 }
 
 /// Flowing wave streamlines integrated through a smooth 2D vector field of
@@ -284,6 +236,15 @@ pub fn fill_cell_net_frayed(region: &Region, spacing: f64, seed: u64, fray: f64)
 /// empty gaps around vortices.
 pub fn fill_eddies(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: Anchor) -> Strokes {
     fill_eddies_frayed(region, spacing, angle, seed, anchor, 0.0)
+}
+
+pub fn fill_eddies_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
+    }
+    fill_pattern_output(region, params, |c, _| {
+        fill_eddies_frayed(&c.limit, c.spacing, c.angle, c.seed, c.anchor, 0.0)
+    })
 }
 
 /// [`fill_eddies`] with optional perimeter-aware edge fraying (`fray` in mm).
@@ -659,6 +620,15 @@ pub fn fill_swells(region: &Region, spacing: f64, angle: f64, seed: u64, anchor:
     fill_swells_frayed(region, spacing, angle, seed, anchor, 0.0)
 }
 
+pub fn fill_swells_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
+    }
+    fill_pattern_output(region, params, |c, _| {
+        fill_swells_frayed(&c.limit, c.spacing, c.angle, c.seed, c.anchor, 0.0)
+    })
+}
+
 /// [`fill_swells`] with optional perimeter-aware edge fraying (`fray` in mm).
 pub fn fill_swells_frayed(
     region: &Region,
@@ -837,6 +807,15 @@ pub fn fill_swells_frayed(
 /// breaks between strokes and optional perimeter-aware edge fraying.
 pub fn fill_ripples(region: &Region, spacing: f64, angle: f64, seed: u64, anchor: Anchor) -> Strokes {
     fill_ripples_frayed(region, spacing, angle, seed, anchor, 0.0)
+}
+
+pub fn fill_ripples_params(region: &Region, params: &FillParams) -> FillOutput {
+    if params.spacing <= 0.0 || region.is_empty() {
+        return FillOutput::default();
+    }
+    fill_pattern_output(region, params, |c, _| {
+        fill_ripples_frayed(&c.limit, c.spacing, c.angle, c.seed, c.anchor, 0.0)
+    })
 }
 
 /// [`fill_ripples`] with optional perimeter-aware edge fraying (`fray` in mm).

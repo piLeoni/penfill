@@ -46,10 +46,14 @@ pub mod tile;
 pub mod truchet;
 pub mod zigzag;
 
-pub use anchor::{Anchor, Origin};
+pub use anchor::{Anchor, Frame, Origin};
 pub use geo::{polyline_length, Region, Strokes};
 pub use isoline_blobs::{
     fill_isoline_blobs, fill_isoline_blobs_with_coverage, FieldSite, FieldSource, FillWithCoverage, IsolineFieldParams,
 };
+pub use pattern::{
+    all_fill_names, fill_by_name, fill_output_by_name, fill_pattern, fill_pattern_output,
+    fill_pattern_with, Canvas, EdgeMode, FillOutput, FillParams, Tools, FILL_NAMES,
+};
 pub use solid::fill_solid;
-pub use stream::{Clipped, Meter, Sink};
+pub use stream::{Clipped, Frayed, Meter, Sink};

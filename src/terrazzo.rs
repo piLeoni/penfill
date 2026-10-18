@@ -1,31 +1,42 @@
 //! Terrazzo: stone chips of many sizes set in a plain binder — a few big
 //! shards, lots of small ones. About a third of the chips are dark: an open
-//! hatch or cross-hatch inside the outline, never a solid block of ink. The
-//! slab is cut by the wall like a real floor.
+//! hatch or cross-hatch inside the outline, never a solid block of ink.
 
 use crate::geo::{Pt, Region, Strokes};
+use crate::pattern::{fill_pattern_output, Canvas, EdgeMode, FillOutput, FillParams, Tools};
 use crate::random::Rng;
 use crate::sweep::sweep_lines;
 
-/// Biggest chips about `size` mm across; dark chips hatched `hatch` mm
-/// apart. Keep `hatch` well above the pen width (size / 6 reads well) or
+/// Biggest chips about `spacing` mm across; dark chips hatched `hatch` mm
+/// apart. Keep `hatch` well above the pen width (`spacing / 6` reads well) or
 /// the dark chips plot as blots.
-pub fn fill_terrazzo(region: &Region, size: f64, hatch: f64, seed: u64) -> Strokes {
-    if size <= 0.0 || hatch <= 0.0 || region.is_empty() {
-        return vec![];
+pub fn fill_terrazzo(region: &Region, spacing: f64, hatch: f64, seed: u64) -> Strokes {
+    fill_terrazzo_params(region, &FillParams::new(spacing).seed(seed), Some(hatch)).strokes
+}
+
+/// Standardized entry point for `terrazzo` returning both `strokes` and the
+/// chip polygon `mask`.
+pub fn fill_terrazzo_params(region: &Region, params: &FillParams, hatch: Option<f64>) -> FillOutput {
+    let size = params.spacing;
+    let hatch_mm = hatch.unwrap_or(size / 6.0);
+    if size <= 0.0 || hatch_mm <= 0.0 || region.is_empty() {
+        return FillOutput::default();
     }
-    let (minx, miny, maxx, maxy) = region.bounds_mm();
+    fill_pattern_output(region, params, |canvas, tools| draw_terrazzo(canvas, tools, hatch_mm))
+}
+
+pub(crate) fn draw_terrazzo(canvas: &Canvas, tools: &Tools, hatch: f64) -> Strokes {
+    let size = canvas.spacing;
+    let (minx, miny, maxx, maxy) = canvas.bounds;
     let (w, h) = (maxx - minx + size, maxy - miny + size);
     let (x0, y0) = (minx - size / 2.0, miny - size / 2.0);
-    let mut rng = Rng::new(seed.wrapping_add(13));
+    let mut rng = tools.rng_salted(13);
     let gap = size * 0.06;
 
-    // Radii biggest first, skewed small: a few shards, many crumbs.
     let count = (w * h / (size * size) * 18.0) as usize;
     let mut radii: Vec<f64> = (0..count).map(|_| size / 2.0 * (0.12 + 0.88 * rng.unit().powi(3))).collect();
     radii.sort_by(|a, b| b.partial_cmp(a).unwrap());
 
-    // Accepted chips binned by centre so the overlap test stays local.
     let bin = size + gap;
     let cols = (w / bin) as usize + 1;
     let rows = (h / bin) as usize + 1;
@@ -34,6 +45,9 @@ pub fn fill_terrazzo(region: &Region, size: f64, hatch: f64, seed: u64) -> Strok
     for r in radii {
         for _ in 0..20 {
             let c = (x0 + rng.unit() * w, y0 + rng.unit() * h);
+            if !tools.element_fits(c, r) {
+                continue;
+            }
             let (bc, br) = (((c.0 - x0) / bin) as usize, ((c.1 - y0) / bin) as usize);
             let free = (br.saturating_sub(1)..=(br + 1).min(rows - 1)).all(|rr| {
                 (bc.saturating_sub(1)..=(bc + 1).min(cols - 1)).all(|cc| {
@@ -51,11 +65,15 @@ pub fn fill_terrazzo(region: &Region, size: f64, hatch: f64, seed: u64) -> Strok
     let mut out: Strokes = Vec::new();
     for (c, r) in chips {
         let ring = shard(c, r, &mut rng);
+        if matches!(canvas.edge, EdgeMode::Inside) && ring.iter().any(|&p| !canvas.region.covers_point(p)) {
+            continue;
+        }
+        tools.add_mask_ring(&ring);
         let dark = rng.unit() < 0.35;
         let hatch_angle = rng.range(0.0, 180.0);
-        out.extend(region.clip_polyline(&ring));
+        out.push(ring.clone());
         if dark {
-            let inside = Region::from_ring(&ring).intersection(region);
+            let inside = Region::from_ring(&ring).intersection(&canvas.limit);
             out.extend(sweep_lines(&inside, hatch, hatch_angle));
             if rng.coin() {
                 out.extend(sweep_lines(&inside, hatch, hatch_angle + 90.0));

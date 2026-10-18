@@ -66,7 +66,24 @@ meet without a seam. Global anchors also change the wall inset for line fills
 
 ## Deliberately awkward test shapes
 
-`examples/gallery.rs` includes a "worst" non-convex outline, and `geo.rs` /
-`anchor.rs` test against stars, doughnuts and islands-in-holes. These exist to
-catch wall-crossing connectors and seams, which are the failure modes the
-geometry kernel and `zigzag` turns are built to avoid.
+`geo.rs` and `anchor.rs` test against stars, doughnuts and islands-in-holes.
+These exist to catch wall-crossing connectors and seams, which are the failure
+modes the geometry kernel and `zigzag` turns are built to avoid. Meanwhile,
+`examples/gallery.rs` uses clean, generous `52 × 52 mm` shapes (square,
+rounded card, smooth ring, harmonic island, island with pond, 5-point star, and
+archipelago) so every pattern and its frayed perimeter read clearly.
+
+## Unified pattern contract: `Canvas`, `Tools`, `EdgeMode`, `fray`, and `FillOutput`
+
+Every built-in pattern and user-supplied pattern shares `FillParams` (`spacing`,
+`angle`, `seed`, `anchor`, `inset`, `edge: EdgeMode::{Clip, Inside, Overflow(mm)}`,
+`fray: f64`) and the `Canvas` + `Tools` standard library (`pattern.rs`).
+- Universal perimeter fraying (`fray.rs`) runs after clipping on any pattern
+  with `fray > 0` (unless the pattern calls `tools.claim_fray()` to perform
+  motif-coherent fraying around shared roots/centres), adapting automatically
+  to continuous polylines, short discrete marks, and closed cell rings.
+- Every pattern can export a polygon knockout silhouette (`FillOutput { strokes, mask }`)
+  via `tools.add_mask_ring` / `tools.add_mask` (or automatic `Region::around_strokes`
+  buffering for line/mark/frayed fills) so foreground layers can cut lower
+  layers cleanly via `below.difference(&out.mask)`.
+

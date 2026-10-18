@@ -14,9 +14,12 @@
 //!
 //! Visual target: `drawland/docs/architecture/img/isoline-blob-fills/`.
 
+use crate::fray::fray_strokes;
 use crate::geo::{Pt, Region, Strokes};
 use crate::isoline_blobs::FillWithCoverage;
 use crate::noise::Perlin;
+pub use crate::pattern::EdgeMode;
+use crate::pattern::{FillOutput, FillParams};
 use crate::random::{poisson_disk, Rng};
 use std::collections::HashMap;
 
@@ -25,17 +28,6 @@ const ISO: f64 = 0.25;
 /// Where an isolated sphere's outline sits, as a fraction of its support
 /// radius: `(1 - q)³ = ISO` at `q = VISIBLE²`.
 const VISIBLE: f64 = 0.608;
-
-/// How the masses meet the region's boundary.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum EdgeMode {
-    /// Ignore the boundary: masses run past it and are cut there.
-    Clip,
-    /// Every mass closes before the boundary; nothing is cut.
-    Inside,
-    /// Bubbles line the boundary and bulge past it by up to this many mm.
-    Overflow(f64),
-}
 
 /// A crown at a known position (a mapped tree): `radius` across in mm,
 /// `height` how tall it stands among its neighbours, in mm.
@@ -96,6 +88,8 @@ pub struct IsolineStackParams {
     /// 0 – 1-ish: wobble of every outline.
     pub jitter: f64,
     pub edge: EdgeMode,
+    /// Smooth perimeter disappearing band in mm (`0.0` = off).
+    pub fray: f64,
     /// A sun from one direction, shading every crown the same way. `None`:
     /// every crown is lit evenly, as before.
     pub light: Option<Light>,
@@ -112,6 +106,7 @@ impl Default for IsolineStackParams {
             slices: 14,
             jitter: 0.8,
             edge: EdgeMode::Clip,
+            fray: 0.0,
             light: None,
         }
     }
@@ -131,6 +126,22 @@ struct Ball {
 
 pub fn fill_isoline_stack(region: &Region, p: &IsolineStackParams) -> Strokes {
     fill_isoline_stack_with_coverage(region, p).strokes
+}
+
+/// Standardized entry point from [`FillParams`] (where `params.spacing` is the
+/// crown radius).
+pub fn fill_isoline_stack_params(region: &Region, params: &FillParams) -> FillOutput {
+    let target = params.resolve_region(region, 0.0);
+    let crown = params.spacing.max(1.0);
+    let p = IsolineStackParams {
+        seed: params.seed,
+        crown,
+        bubble: (crown * 0.30).max(0.4),
+        edge: params.edge,
+        fray: params.fray,
+        ..Default::default()
+    };
+    fill_isoline_stack_with_coverage(&target, &p).into()
 }
 
 pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams) -> FillWithCoverage {
@@ -254,7 +265,12 @@ pub fn fill_isoline_stack_with_coverage(region: &Region, p: &IsolineStackParams)
             strokes.extend(s.hatching(&keep, l));
         }
     }
-    FillWithCoverage { strokes: keep.clip_strokes(&strokes), coverage: above.intersection(&keep) }
+    let final_strokes = if p.fray > 0.0 {
+        fray_strokes(&keep, strokes, bubble, p.fray, p.seed)
+    } else {
+        keep.clip_strokes(&strokes)
+    };
+    FillWithCoverage { strokes: final_strokes, coverage: above.intersection(&keep) }
 }
 
 /// The stack's top surface on a grid, lit: what the shading hatch follows.

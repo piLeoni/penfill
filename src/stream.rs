@@ -99,6 +99,59 @@ impl<S: Sink> Sink for Clipped<'_, S> {
     }
 }
 
+/// A sink that clips each stroke to `region` and applies perimeter edge
+/// fraying (`fray` mm) as strokes arrive, without holding the whole drawing.
+pub struct Frayed<'a, S: Sink> {
+    region: &'a Region,
+    spacing: f64,
+    fray: f64,
+    seed: u64,
+    noise: crate::noise::Perlin,
+    index: usize,
+    inner: S,
+}
+
+impl<'a, S: Sink> Frayed<'a, S> {
+    pub fn new(region: &'a Region, spacing: f64, fray: f64, seed: u64, inner: S) -> Frayed<'a, S> {
+        Frayed {
+            region,
+            spacing,
+            fray,
+            seed,
+            noise: crate::noise::Perlin::new(seed ^ 0xF4A7_5EA1),
+            index: 0,
+            inner,
+        }
+    }
+
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
+}
+
+impl<S: Sink> Sink for Frayed<'_, S> {
+    fn stroke(&mut self, pts: Vec<Pt>) {
+        for cut in self.region.clip_polyline(&pts) {
+            if self.fray <= 0.0 || self.spacing <= 0.0 {
+                self.inner.stroke(cut);
+            } else {
+                let idx = self.index;
+                self.index += 1;
+                crate::fray::fray_clipped_stroke(
+                    self.region,
+                    cut,
+                    idx,
+                    self.spacing,
+                    self.fray,
+                    self.seed,
+                    &self.noise,
+                    &mut self.inner,
+                );
+            }
+        }
+    }
+}
+
 /// The cheap probe: count strokes and their points without keeping them.
 ///
 /// Run a fill into a `Meter` to know its size before running it for real.
@@ -164,6 +217,20 @@ mod tests {
             }
         }
         assert_eq!(s, region.clip_strokes(&raw));
+    }
+
+    #[test]
+    fn frayed_sink_matches_fray_strokes() {
+        let region = square();
+        let raw: Strokes = (0..15).map(|i| vec![(-5.0, i as f64 * 2.0), (35.0, i as f64 * 2.0)]).collect();
+        let mut s: Strokes = Vec::new();
+        {
+            let mut f = Frayed::new(&region, 2.0, 6.0, 11, &mut s);
+            for line in &raw {
+                f.stroke(line.clone());
+            }
+        }
+        assert_eq!(s, crate::fray::fray_strokes(&region, raw, 2.0, 6.0, 11));
     }
 
     #[test]

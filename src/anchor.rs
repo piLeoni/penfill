@@ -62,7 +62,7 @@ impl Anchor {
 /// A lattice frame on the page: an origin and a turn. Pattern coordinates
 /// `(u, v)` map to the page as `origin + R(angle) · (u, v)`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Frame {
+pub struct Frame {
     pub origin: Pt,
     sin: f64,
     cos: f64,
@@ -106,19 +106,19 @@ impl Frame {
 }
 
 /// Lattice indices `k` with `k · pitch` covering `lo..=hi`, one spare each side.
-pub(crate) fn indices(lo: f64, hi: f64, pitch: f64) -> std::ops::RangeInclusive<i64> {
+pub fn indices(lo: f64, hi: f64, pitch: f64) -> std::ops::RangeInclusive<i64> {
     ((lo / pitch).floor() as i64 - 1)..=((hi / pitch).ceil() as i64 + 1)
 }
 
 /// The middle of the region's bounds: most patterns' own reference point.
-pub(crate) fn centre(region: &Region) -> Pt {
+pub fn centre(region: &Region) -> Pt {
     let (minx, miny, maxx, maxy) = region.bounds_mm();
     ((minx + maxx) / 2.0, (miny + maxy) / 2.0)
 }
 
 /// A random choice per lattice cell: the same cell gets the same answer
 /// whichever region asks, so a global lattice stays continuous.
-pub(crate) fn cell_seed(seed: u64, i: i64, j: i64) -> u64 {
+pub fn cell_seed(seed: u64, i: i64, j: i64) -> u64 {
     let mut z = seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (j as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);

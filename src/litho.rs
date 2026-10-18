@@ -44,8 +44,8 @@ fn grid(region: &Region, dx: f64, dy: f64, pad: f64, f: impl FnMut(i64, i64, Pt)
 }
 
 /// `f` for each lattice point inside the region, with an optional jitter.
-/// The RNG goes to `f` too, so a mark builder and the jitter draw from one
-/// stream in a fixed order and the pattern stays reproducible.
+/// Each cell `(i, j)` draws from its own [`crate::anchor::cell_seed`] stream so
+/// neighbouring regions share a continuous lattice.
 fn inside_grid_seeded(
     region: &Region,
     dx: f64,
@@ -55,8 +55,8 @@ fn inside_grid_seeded(
     seed: u64,
     mut f: impl FnMut(&mut Rng, i64, i64, Pt),
 ) {
-    let mut rng = Rng::new(seed);
-    stagger_grid(region, dx, dy, offset, dx.max(dy), |i, j, (x, y)| {
+    stagger_grid(region, dx, dy, offset, dx.max(dy) + jitter.abs(), |i, j, (x, y)| {
+        let mut rng = Rng::new(crate::anchor::cell_seed(seed, i, j));
         let c = (x + rng.range(-jitter, jitter), y + rng.range(-jitter, jitter));
         if region.covers_point(c) {
             f(&mut rng, i, j, c);
@@ -1065,6 +1065,7 @@ fn voronoi_graded(region: &Region, spacing: f64, seed: u64, gap: f64, vary: f64,
     if spacing <= 0.0 || region.is_empty() {
         return vec![];
     }
+    let tools = crate::pattern::Tools::new(region, seed).with_spacing(spacing);
     let field = region.outset(spacing);
     let mut centres = poisson_disk(&field, spacing * 0.9, seed);
     if vary > 0.0 {
@@ -1074,25 +1075,10 @@ fn voronoi_graded(region: &Region, spacing: f64, seed: u64, gap: f64, vary: f64,
             *c = (c.0 + rng.range(-d, d), c.1 + rng.range(-d, d));
         }
     }
-    let reach2 = (spacing * 2.2).powi(2);
     let min_area = 0.05 * spacing * spacing;
     let mut out: Strokes = Vec::new();
-    for (i, &c) in centres.iter().enumerate() {
-        let r = spacing * 1.8;
-        let mut cell = vec![(c.0 - r, c.1 - r), (c.0 + r, c.1 - r), (c.0 + r, c.1 + r), (c.0 - r, c.1 + r)];
-        for (j, &o) in centres.iter().enumerate() {
-            if i == j || (o.0 - c.0).powi(2) + (o.1 - c.1).powi(2) > reach2 {
-                continue;
-            }
-            cell = clip_half_plane(&cell, c, o);
-            if cell.len() < 3 {
-                break;
-            }
-        }
-        if cell.len() < 3 {
-            continue;
-        }
-        let cell = Region::from_ring(&cell).intersection(region);
+    for (_, _, cell_ring) in tools.voronoi_cells(&centres, spacing * 2.2) {
+        let cell = Region::from_ring(&cell_ring).intersection(region);
         let area: f64 = cell.all_rings_mm().iter().map(|r| signed_area(r)).sum();
         if area < min_area {
             continue;
@@ -1116,24 +1102,129 @@ fn voronoi_graded(region: &Region, spacing: f64, seed: u64, gap: f64, vary: f64,
     out
 }
 
-fn clip_half_plane(poly: &[Pt], c: Pt, o: Pt) -> Vec<Pt> {
-    let m = ((c.0 + o.0) / 2.0, (c.1 + o.1) / 2.0);
-    let n = (o.0 - c.0, o.1 - c.1);
-    let side = |p: Pt| (p.0 - m.0) * n.0 + (p.1 - m.1) * n.1;
-    let mut out = Vec::new();
-    for i in 0..poly.len() {
-        let a = poly[i];
-        let b = poly[(i + 1) % poly.len()];
-        let (sa, sb) = (side(a), side(b));
-        if sa <= 0.0 {
-            out.push(a);
-        }
-        if (sa < 0.0 && sb > 0.0) || (sa > 0.0 && sb < 0.0) {
-            let t = sa / (sa - sb);
-            out.push((a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1)));
-        }
-    }
-    out
+/// Names of all 46 lithology / ground fills in this module.
+pub const BUILTIN: &[&str] = &[
+    "granite",
+    "granite2",
+    "diorite",
+    "gabbro",
+    "brackets",
+    "dacite",
+    "feldspar",
+    "arena",
+    "conglom5",
+    "conglomerate",
+    "conglomerate2",
+    "coarse_stone",
+    "mixed_rocks",
+    "cracked_earth",
+    "chalky_soil",
+    "loose_soil",
+    "compacted_soil",
+    "sandy_soil",
+    "mulched_soil",
+    "debris_soil",
+    "sandstone",
+    "grainy_soil",
+    "topsoil",
+    "dry_cracked",
+    "erosion",
+    "stone_cluster",
+    "drift",
+    "breccia",
+    "breccia2",
+    "shards",
+    "beds",
+    "laminae",
+    "coal",
+    "gneiss",
+    "benton",
+    "masonry",
+    "ferrous",
+    "amphibolite",
+    "diatom",
+    "diatom2",
+    "coquina",
+    "diabase",
+    "ophitic",
+    "gravelly_soil",
+    "mulch",
+    "layered_soil",
+    "pebbled_soil",
+    "clay_soil",
+    "silty_soil",
+    "fine_gravel",
+    "pebble_scatter",
+    "fill",
+    "lava",
+    "hornblende",
+];
+
+/// Dispatch a lithology / ground fill by its canonical name.
+pub fn fill_by_name(
+    name: &str,
+    region: &Region,
+    spacing: f64,
+    angle: f64,
+    seed: u64,
+) -> Option<Strokes> {
+    Some(match name {
+        "granite" => fill_granite(region, spacing, seed),
+        "granite2" => fill_granite2(region, spacing, seed),
+        "diorite" => fill_diorite(region, spacing, seed),
+        "gabbro" => fill_gabbro(region, spacing, seed),
+        "brackets" => fill_brackets(region, spacing, seed),
+        "dacite" => fill_dacite(region, spacing, angle, seed),
+        "feldspar" => fill_feldspar(region, spacing, angle, seed),
+        "arena" => fill_arena(region, spacing, seed),
+        "conglom5" => fill_conglom5(region, spacing, seed),
+        "conglomerate" => fill_conglomerate(region, spacing, seed),
+        "conglomerate2" => fill_conglomerate2(region, spacing, seed),
+        "coarse_stone" => fill_coarse_stone(region, spacing, seed),
+        "mixed_rocks" => fill_mixed_rocks(region, spacing, seed),
+        "cracked_earth" => fill_cracked_earth(region, spacing, seed),
+        "chalky_soil" => fill_chalky_soil(region, spacing, seed),
+        "loose_soil" => fill_loose_soil(region, spacing, seed),
+        "compacted_soil" => fill_compacted_soil(region, spacing, angle, seed),
+        "sandy_soil" => fill_sandy_soil(region, spacing, seed),
+        "mulched_soil" => fill_mulched_soil(region, spacing, angle, seed),
+        "debris_soil" => fill_debris_soil(region, spacing, seed),
+        "sandstone" => fill_sandstone(region, spacing, angle, seed),
+        "grainy_soil" => fill_grainy_soil(region, spacing, seed),
+        "topsoil" => fill_topsoil(region, spacing, seed),
+        "dry_cracked" => fill_dry_cracked(region, spacing, seed),
+        "erosion" => fill_erosion(region, spacing, angle, seed),
+        "stone_cluster" => fill_stone_cluster(region, spacing, seed),
+        "drift" => fill_drift(region, spacing, seed),
+        "breccia" => fill_breccia(region, spacing, seed),
+        "breccia2" => fill_breccia2(region, spacing, seed),
+        "shards" => fill_shards(region, spacing, seed),
+        "beds" => fill_beds(region, spacing, angle, seed),
+        "laminae" => fill_laminae(region, spacing, angle, seed),
+        "coal" => fill_coal(region, spacing, angle, seed),
+        "gneiss" => fill_gneiss(region, spacing, angle, seed),
+        "benton" => fill_benton(region, spacing, angle, seed),
+        "masonry" => fill_masonry(region, spacing, seed),
+        "ferrous" => fill_ferrous(region, spacing, seed),
+        "amphibolite" => fill_amphibolite(region, spacing, seed),
+        "diatom" => fill_diatom(region, spacing, seed),
+        "diatom2" => fill_diatom2(region, spacing, seed),
+        "coquina" => fill_coquina(region, spacing, seed),
+        "diabase" => fill_diabase(region, spacing, angle, seed),
+        "ophitic" => fill_ophitic(region, spacing, angle, seed),
+        "gravelly_soil" => fill_gravelly_soil(region, spacing, seed),
+        "mulch" => fill_mulch(region, spacing, angle, seed),
+        "layered_soil" => fill_layered_soil(region, spacing, angle, seed),
+        "pebbled_soil" => fill_pebbled_soil(region, spacing, seed),
+        "clay_soil" => fill_clay_soil(region, spacing, angle, seed),
+        "silty_soil" => fill_silty_soil(region, spacing, seed),
+        "fine_gravel" => fill_fine_gravel(region, spacing, seed),
+        "pebble_scatter" => fill_pebble_scatter(region, spacing, seed),
+        "fill" => fill_fill(region, spacing, angle, seed),
+        "lava" => fill_lava(region, spacing, seed),
+        "hornblende" => fill_hornblende(region, spacing, angle, seed),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

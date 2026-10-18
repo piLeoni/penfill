@@ -4,21 +4,48 @@ The paths by which a caller supplies their own geometry instead of choosing a
 built-in fill. All share one contract: the engine clips to the region, the
 caller does not.
 
-## `pattern.rs` — your own function
+## `pattern.rs` — your own function and the unified pattern contract
 
-`fill_pattern(region, seed, anchor, draw)` calls `draw` **once** with:
+`fill_pattern(region, seed, anchor, draw)`, `fill_pattern_with(region, params, draw)`,
+and `fill_pattern_output(region, params, draw) -> FillOutput { strokes, mask }`
+call `draw` **once** with:
 
-- `Canvas`: `region`, `bounds`, `seed`, `anchor`, and `origin` (the resolved
-  anchor point). The pattern returns lines anywhere on the page.
-- `Tools`: the pieces the built-in fills are made of, already set to the
-  canvas region and seed — `noise(x, y, octaves)`, `scatter(spacing)`,
-  `scatter_field(dense, sparse, field)`, `hatch(spacing, angle)`. A pattern
-  can ignore it. `Tools::on(region)` re-points the same tools at a piece or an
-  inset; `Tools::anchored(anchor)` changes the lattice placement.
+- `FillParams`: standardized parameters shared across patterns (`spacing`,
+  `angle`, `seed`, `anchor`, `inset`, `edge: EdgeMode::{Clip, Inside, Overflow(mm)}`,
+  `fray: f64`).
+- `Canvas`: `region` (after `inset`), `limit` (effective outer clipping envelope,
+  outset by `mm` in `EdgeMode::Overflow(mm)`), `bounds`, `spacing`, `angle`,
+  `seed`, `anchor`, `origin` (the resolved anchor point), `edge`, and `fray`.
+- `Tools`: the standard library that built-in fills themselves are built with:
+  - **Scoping**: `on(region)`, `anchored(anchor)`, `with_spacing(s)`,
+    `with_edge(edge)`, `with_fray(f)`, `seeded(seed)`
+  - **Random & Noise**: `rng()`, `rng_salted(salt)`, `cell_rng(i, j)`,
+    `noise(x, y, octaves)`
+  - **Boundary & Fray**: `whole_at(p)`, `whole_at_band(p, spacing, fray)`,
+    `border_ramp(p, falloff, rough)`, `element_fits(centre, radius)`,
+    `placement_field(pad)`, `claim_fray()` (marks that the pattern handles `fray`
+    at the motif level so `run_pattern` clips without post-pass stroke chopping)
+  - **Lattices & Fields**: `frame(angle)`, `grid(dx, dy, angle, stagger, pad, visit)`,
+    `grid_cells(...)`, `hatch(spacing, angle)`, `profile(...)`, `isolines(...)`
+  - **Scatter & Voronoi**: `scatter(spacing)`, `scatter_field(dense, sparse, field)`
+    (bidirectional: `dense` and `sparse` can go either way),
+    `voronoi_cells(centres, reach)`, `voronoi_edges(centres, reach)`
+  - **Marks & Polylines**: `circle`, `lobe`, `arc`, `tick`, `cross`, `x_cross`,
+    `smooth`, `resample`, `fray`
+  - **Polygon Mask Export**: `add_mask_ring(&ring)`, `add_mask(&region)`,
+    `set_mask_halo(radius)` — zero-cost no-op when only `Strokes` are requested
+    (`fill_pattern_with` / `fill_by_name`), unioned into `FillOutput.mask` when
+    `fill_pattern_output` / `fill_output_by_name` is called. Nested pattern calls
+    inside `fill_pattern_output` automatically inherit the active mask collector.
 
-The engine keeps the parts inside the shape with **one** `clip_strokes` over
-the whole region. Splitting the region into pieces costs time, so it only
-happens when the pattern asks for `Region::parts`.
+The engine clips (and when `params.fray > 0` and `!tools.claim_fray()`, applies
+universal geometry-adaptive edge fraying across long lines, discrete marks/dots,
+and small closed rings) against `canvas.limit` at the end.
+
+The unified pattern registry (`FILL_NAMES`, `all_fill_names()`,
+`fill_by_name(name, region, params)`, `fill_output_by_name(name, region, params)`)
+dispatches all built-in geometric, lattice, scatter, nature, texture, isoline,
+`litho::BUILTIN`, and `pat:<NAME>` patterns through this contract.
 
 **Invariant** (`built_in_fills_compose_whole_or_per_piece`): a built-in fill
 used through `fill_pattern` must equal the direct fill, whether drawn whole or
