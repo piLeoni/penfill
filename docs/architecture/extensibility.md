@@ -12,10 +12,11 @@ call `draw` **once** with:
 
 - `FillParams`: standardized parameters shared across patterns (`spacing`,
   `angle`, `seed`, `anchor`, `inset`, `edge: EdgeMode::{Clip, Inside, Overflow(mm)}`,
-  `fray: f64`).
+  `fray: f64`, `custom: CustomParams`).
 - `Canvas`: `region` (after `inset`), `limit` (effective outer clipping envelope,
   outset by `mm` in `EdgeMode::Overflow(mm)`), `bounds`, `spacing`, `angle`,
-  `seed`, `anchor`, `origin` (the resolved anchor point), `edge`, and `fray`.
+  `seed`, `anchor`, `origin` (the resolved anchor point), `edge`, `fray`, and
+  `custom` (`canvas.param(key, default)`).
 - `Tools`: the standard library that built-in fills themselves are built with:
   - **Scoping**: `on(region)`, `anchored(anchor)`, `with_spacing(s)`,
     `with_edge(edge)`, `with_fray(f)`, `seeded(seed)`

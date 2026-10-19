@@ -25,12 +25,14 @@ is unavailable there; the profile sets `opt-level = "s"` for size.
   unpacking `strokes, mask = out`). Exposes `fill(region, name, ...)` and
   `fill_output(region, name, ...)` over `FILLS` alongside dedicated per-pattern
   functions, all supporting `inset`, `edge` (`"clip"`, `"inside"`,
-  `("overflow", mm)`), `fray`, and `with_mask`. Stubs in `penfill.pyi`.
+  `("overflow", mm)`), `fray`, `custom` (`dict[str, float]`), and `with_mask`.
+  Stubs in `penfill.pyi`.
 - **Node** (`bindings/node/src/lib.rs`): points are `[x, y]` arrays, strokes
   are arrays of points, all mm. Required parameters are positional; the rest
   go in `FillOptions` (`angle`, `seed`, `inset`, `edge`, `overflow`, `fray`,
-  `anchor`, `shift`). Exposes `fill`, `fillOutput`, `fills()`, `pattern`,
-  `patternOutput`, and dedicated fill functions. Types in `index.d.ts`.
+  `anchor`, `shift`, `custom`). Exposes `fill`, `fillOutput`, `fills()`,
+  `pattern`, `patternOutput`, and dedicated fill functions. Types in
+  `index.d.ts`.
 - **wasm** (`bindings/wasm/src/lib.rs`): minimal surface, rings as flat
   `[x0, y0, x1, y1, …]` arrays, **SVG out** — delegates directly to
   `penfill::fill_by_name` and `penfill::all_fill_names()`, supporting `inset`,

@@ -94,6 +94,9 @@ FILL_KEYS = {
     "size",
     "hatch",
     "inset",
+    "edge",
+    "fray",
+    "custom",
     "centre",
 }
 

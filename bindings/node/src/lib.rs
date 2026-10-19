@@ -301,17 +301,25 @@ pub struct FillOptions {
     /// Moves the lattice from its anchor, mm.
     #[napi(ts_type = "[number, number]")]
     pub shift: Option<Vec<f64>>,
+    /// Pattern-specific custom numeric parameters (e.g. `{ jaggedness: 1.2, coverage: 0.7 }`).
+    pub custom: Option<std::collections::HashMap<String, f64>>,
 }
 
 impl FillOptions {
     fn to_params(&self, spacing: f64) -> Result<FillParams> {
-        Ok(FillParams::new(spacing)
+        let mut params = FillParams::new(spacing)
             .angle(self.angle.unwrap_or(0.0))
             .seed(self.seed.unwrap_or(0) as u64)
             .anchor(anchor_of(&self.anchor, &self.shift)?)
             .inset(self.inset)
             .edge(edge_of(&self.edge, self.overflow)?)
-            .fray(self.fray.unwrap_or(0.0).max(0.0)))
+            .fray(self.fray.unwrap_or(0.0).max(0.0));
+        if let Some(custom) = &self.custom {
+            for (k, v) in custom {
+                params.custom.set(k, *v);
+            }
+        }
+        Ok(params)
     }
 }
 
@@ -1189,6 +1197,7 @@ pub struct Canvas {
     seed: u32,
     origin: Pt,
     fray: f64,
+    custom: pf::CustomParams,
 }
 
 #[napi]
@@ -1239,6 +1248,12 @@ impl Canvas {
     pub fn fray(&self) -> f64 {
         self.fray
     }
+
+    /// Read a pattern-specific custom parameter, falling back to `defaultValue` (or `0`).
+    #[napi]
+    pub fn param(&self, key: String, default_value: Option<f64>) -> f64 {
+        self.custom.get_or(&key, default_value.unwrap_or(0.0))
+    }
 }
 
 #[napi(object)]
@@ -1266,17 +1281,25 @@ pub struct PatternOptions {
     /// Moves the lattice from its anchor, mm.
     #[napi(ts_type = "[number, number]")]
     pub shift: Option<Vec<f64>>,
+    /// Pattern-specific custom numeric parameters (e.g. `{ jaggedness: 1.2, coverage: 0.7 }`).
+    pub custom: Option<std::collections::HashMap<String, f64>>,
 }
 
 impl PatternOptions {
     fn to_params(&self) -> Result<FillParams> {
-        Ok(FillParams::new(self.spacing.unwrap_or(2.0))
+        let mut params = FillParams::new(self.spacing.unwrap_or(2.0))
             .angle(self.angle.unwrap_or(0.0))
             .seed(self.seed.unwrap_or(0) as u64)
             .anchor(anchor_of(&self.anchor, &self.shift)?)
             .inset(self.inset)
             .edge(edge_of(&self.edge, self.overflow)?)
-            .fray(self.fray.unwrap_or(0.0).max(0.0)))
+            .fray(self.fray.unwrap_or(0.0).max(0.0));
+        if let Some(custom) = &self.custom {
+            for (k, v) in custom {
+                params.custom.set(k, *v);
+            }
+        }
+        Ok(params)
     }
 }
 
@@ -1305,6 +1328,7 @@ pub fn pattern(
             seed: seed_u32,
             origin: c.origin,
             fray: c.fray,
+            custom: c.custom,
         };
         let tools = Tools::make(c.region.clone(), c.limit.clone(), params);
         match draw.call((canvas, tools).into()).and_then(|s| strokes_in(&s)) {
@@ -1344,6 +1368,7 @@ pub fn pattern_output(
             seed: seed_u32,
             origin: c.origin,
             fray: c.fray,
+            custom: c.custom,
         };
         let tools = Tools::make(c.region.clone(), c.limit.clone(), params);
         match draw.call((canvas, tools).into()).and_then(|s| strokes_in(&s)) {

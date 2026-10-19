@@ -885,7 +885,7 @@ fn build_jagged_ring_layer(
     ];
 
     let mut raw_r = [0.0f64; LUT_BINS];
-    for i in 0..LUT_BINS {
+    for (i, r_slot) in raw_r.iter_mut().enumerate().take(LUT_BINS) {
         let theta = TAU * (i as f64) / (LUT_BINS as f64);
         let (ct, st) = (theta.cos(), theta.sin());
 
@@ -918,7 +918,7 @@ fn build_jagged_ring_layer(
 
         let factor = (1.0 + oval + macro_amp * n_mac + meso_amp * n_mes + micro_amp * n_mic + scallop + cleft)
             .clamp(0.30, 1.68);
-        raw_r[i] = (r_mean * factor).max(0.07);
+        *r_slot = (r_mean * factor).max(0.07);
     }
 
     // Two-pass asymmetric radial smoothing: rounds outward lobes into clean, plotter-friendly
@@ -1049,10 +1049,10 @@ fn render_layers_fast(
         let mut vis = [false; LUT_BINS];
         let mut all_vis = true;
         let mut any_vis = false;
-        for i in 0..n {
-            vis[i] = is_vertex_visible(i, layer.ring[i]);
-            all_vis &= vis[i];
-            any_vis |= vis[i];
+        for (i, vis_slot) in vis.iter_mut().enumerate().take(n) {
+            *vis_slot = is_vertex_visible(i, layer.ring[i]);
+            all_vis &= *vis_slot;
+            any_vis |= *vis_slot;
         }
 
         if !any_vis {

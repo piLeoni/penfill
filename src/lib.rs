@@ -53,7 +53,7 @@ pub use isoline_blobs::{
 };
 pub use pattern::{
     all_fill_names, fill_by_name, fill_output_by_name, fill_pattern, fill_pattern_output,
-    fill_pattern_with, Canvas, EdgeMode, FillOutput, FillParams, Tools, FILL_NAMES,
+    fill_pattern_with, Canvas, CustomParams, EdgeMode, FillOutput, FillParams, Tools, FILL_NAMES,
 };
 pub use solid::fill_solid;
 pub use stream::{Clipped, Frayed, Meter, Sink};

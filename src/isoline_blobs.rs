@@ -193,7 +193,7 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
     let levels = levels_every(p.threshold, max_level, level_step);
     let cell = (p.contour_spacing * 0.3).min(feature * 0.12).clamp(0.04, 0.4);
 
-    let raw_strokes = fill_isolines(&limit, cell, &levels, &field);
+    let raw_strokes = fill_isolines(&limit, cell, &levels, field);
     let strokes = if p.fray > 0.0 {
         fray_strokes(&limit, raw_strokes, p.contour_spacing, p.fray, p.seed)
     } else {

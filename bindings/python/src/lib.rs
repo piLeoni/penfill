@@ -324,6 +324,17 @@ fn make_params(
         .fray(fray.max(0.0)))
 }
 
+fn apply_custom(params: &mut FillParams, custom: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+    if let Some(dict) = custom {
+        for (k, v) in dict.iter() {
+            let key: String = k.extract()?;
+            let val: f64 = v.extract()?;
+            params.custom.set(&key, val);
+        }
+    }
+    Ok(())
+}
+
 fn finish_output<'py>(
     py: Python<'py>,
     out: pf::FillOutput,
@@ -339,9 +350,9 @@ fn finish_output<'py>(
 // ---- universal registry entry points ----
 
 /// Run any built-in pattern by name with unified parameters (`spacing`, `angle`,
-/// `seed`, `inset`, `edge`, `fray`, `anchor`, `shift`, `with_mask`).
+/// `seed`, `inset`, `edge`, `fray`, `anchor`, `shift`, `custom`, `with_mask`).
 #[pyfunction]
-#[pyo3(signature = (region, name, spacing = 2.0, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), with_mask = false))]
+#[pyo3(signature = (region, name, spacing = 2.0, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), custom = None, with_mask = false))]
 #[allow(clippy::too_many_arguments)]
 fn fill<'py>(
     py: Python<'py>,
@@ -355,9 +366,11 @@ fn fill<'py>(
     fray: f64,
     anchor: &str,
     shift: (f64, f64),
+    custom: Option<&Bound<'py, PyDict>>,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    let mut params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    apply_custom(&mut params, custom)?;
     if with_mask {
         let out = pf::fill_output_by_name(name, &region.inner, &params)
             .ok_or_else(|| PyKeyError::new_err(format!("no fill named {name:?}")))?;
@@ -371,7 +384,7 @@ fn fill<'py>(
 
 /// Run any built-in pattern by name and always return a `FillOutput(strokes, mask)`.
 #[pyfunction]
-#[pyo3(signature = (region, name, spacing = 2.0, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0)))]
+#[pyo3(signature = (region, name, spacing = 2.0, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), custom = None))]
 #[allow(clippy::too_many_arguments)]
 fn fill_output<'py>(
     py: Python<'py>,
@@ -385,8 +398,10 @@ fn fill_output<'py>(
     fray: f64,
     anchor: &str,
     shift: (f64, f64),
+    custom: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<FillOutput> {
-    let params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    let mut params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    apply_custom(&mut params, custom)?;
     let out = pf::fill_output_by_name(name, &region.inner, &params)
         .ok_or_else(|| PyKeyError::new_err(format!("no fill named {name:?}")))?;
     FillOutput::from_core(py, out)
@@ -413,7 +428,7 @@ macro_rules! registry_pyfill {
             fray: f64,
             with_mask: bool,
         ) -> PyResult<Bound<'py, PyAny>> {
-            fill(py, region, $name_lit, spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+            fill(py, region, $name_lit, spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
         }
     };
 }
@@ -446,7 +461,7 @@ fn lines<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "lines", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "lines", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Two hatches at 90°.
@@ -466,7 +481,7 @@ fn grid<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "grid", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "grid", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Three hatches at 60° sharing every crossing.
@@ -486,7 +501,7 @@ fn triangles<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "triangles", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "triangles", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Closed rings following the outline inwards.
@@ -516,6 +531,7 @@ fn concentric<'py>(
 /// One continuous path winding inwards.
 #[pyfunction]
 #[pyo3(signature = (region, spacing, *, inset = None, edge = None, fray = 0.0, seed = 0, with_mask = false))]
+#[allow(clippy::too_many_arguments)]
 fn spiral<'py>(
     py: Python<'py>,
     region: &Region,
@@ -526,12 +542,13 @@ fn spiral<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "spiral", spacing, 0.0, seed, inset, edge, fray, "local", (0.0, 0.0), with_mask)
+    fill(py, region, "spiral", spacing, 0.0, seed, inset, edge, fray, "local", (0.0, 0.0), None, with_mask)
 }
 
 /// Space-filling Hilbert curve, one continuous path clipped to the region.
 #[pyfunction]
 #[pyo3(signature = (region, spacing, inset = None, *, edge = None, fray = 0.0, seed = 0, with_mask = false))]
+#[allow(clippy::too_many_arguments)]
 fn hilbert<'py>(
     py: Python<'py>,
     region: &Region,
@@ -673,7 +690,7 @@ fn scales<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "scales", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "scales", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Rays from the anchor (the middle of the bounds by default); `centre`
@@ -711,6 +728,7 @@ fn sunburst<'py>(
         fray,
         anchor_name,
         shift_val,
+        None,
         with_mask,
     )
 }
@@ -875,7 +893,7 @@ fn grass<'py>(
     fray: f64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "grass", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "grass", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Hand-drawn cross-hatching.
@@ -893,7 +911,7 @@ fn scribble<'py>(
     fray: f64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "scribble", spacing, angle, seed, inset, edge, fray, "local", (0.0, 0.0), with_mask)
+    fill(py, region, "scribble", spacing, angle, seed, inset, edge, fray, "local", (0.0, 0.0), None, with_mask)
 }
 
 /// Random quarter-circle tiles joined into winding paths.
@@ -913,7 +931,7 @@ fn truchet<'py>(
     fray: f64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "truchet", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "truchet", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 // ---- materials & textures ----
@@ -935,7 +953,7 @@ fn marble<'py>(
     fray: f64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "marble", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "marble", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Wood growth rings bending around knots.
@@ -955,7 +973,7 @@ fn wood<'py>(
     fray: f64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "wood", spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+    fill(py, region, "wood", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Parched ground / mud cracks (rounded Voronoi cells).
@@ -1028,7 +1046,7 @@ macro_rules! nature_pyfill {
     ($(#[$doc:meta])* $fn_name:ident, $name_lit:literal) => {
         $(#[$doc])*
         #[pyfunction]
-        #[pyo3(signature = (region, spacing, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), with_mask = false))]
+        #[pyo3(signature = (region, spacing, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), custom = None, with_mask = false))]
         #[allow(clippy::too_many_arguments)]
         fn $fn_name<'py>(
             py: Python<'py>,
@@ -1041,9 +1059,10 @@ macro_rules! nature_pyfill {
             fray: f64,
             anchor: &str,
             shift: (f64, f64),
+            custom: Option<&Bound<'py, PyDict>>,
             with_mask: bool,
         ) -> PyResult<Bound<'py, PyAny>> {
-            fill(py, region, $name_lit, spacing, angle, seed, inset, edge, fray, anchor, shift, with_mask)
+            fill(py, region, $name_lit, spacing, angle, seed, inset, edge, fray, anchor, shift, custom, with_mask)
         }
     };
 }
@@ -1195,10 +1214,17 @@ struct Canvas {
     origin: Pt,
     #[pyo3(get)]
     fray: f64,
+    custom: pf::CustomParams,
 }
 
 #[pymethods]
 impl Canvas {
+    /// Read a pattern-specific custom parameter, falling back to `default`.
+    #[pyo3(signature = (key, default = 0.0))]
+    fn param(&self, key: &str, default: f64) -> f64 {
+        self.custom.get_or(key, default)
+    }
+
     fn __repr__(&self) -> String {
         let (a, b, c, d) = self.bounds;
         format!(
@@ -1410,7 +1436,7 @@ fn wants_tools(py: Python<'_>, draw: &Bound<'_, PyAny>) -> bool {
 /// page and they come back clipped (and optionally frayed) to the region.
 /// `tools` is optional: `draw(canvas)` works too.
 #[pyfunction]
-#[pyo3(signature = (region, draw, seed = 0, anchor = "local", shift = (0.0, 0.0), *, spacing = 2.0, angle = 0.0, inset = None, edge = None, fray = 0.0, with_mask = false))]
+#[pyo3(signature = (region, draw, seed = 0, anchor = "local", shift = (0.0, 0.0), *, spacing = 2.0, angle = 0.0, inset = None, edge = None, fray = 0.0, custom = None, with_mask = false))]
 #[allow(clippy::too_many_arguments)]
 fn pattern<'py>(
     py: Python<'py>,
@@ -1424,9 +1450,11 @@ fn pattern<'py>(
     inset: Option<f64>,
     edge: Option<&Bound<'py, PyAny>>,
     fray: f64,
+    custom: Option<&Bound<'py, PyDict>>,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    let mut params = make_params(spacing, angle, seed, anchor, shift, inset, edge, fray)?;
+    apply_custom(&mut params, custom)?;
     let inner = region.get().inner.clone();
     let with_tools = wants_tools(py, draw);
     let error: RefCell<Option<PyErr>> = RefCell::new(None);
@@ -1443,6 +1471,7 @@ fn pattern<'py>(
                 seed: c.seed,
                 origin: c.origin,
                 fray: c.fray,
+                custom: c.custom,
             };
             let result = if with_tools {
                 let tools = Tools {

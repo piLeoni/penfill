@@ -18,6 +18,8 @@ export declare class Canvas {
   /** The anchor resolved for this region: the point to build a lattice through. */
   get origin(): [number, number]
   get fray(): number
+  /** Read a pattern-specific custom parameter, falling back to `defaultValue` (or `0`). */
+  param(key: string, defaultValue?: number | undefined | null): number
 }
 
 /** Output of a fill with its polygon `mask`: `{ strokes, mask: Region }`. */
@@ -137,6 +139,8 @@ export interface FillOptions {
   anchor?: 'local' | 'global'
   /** Moves the lattice from its anchor, mm. */
   shift?: [number, number]
+  /** Pattern-specific custom numeric parameters (e.g. `{ jaggedness: 1.2, coverage: 0.7 }`). */
+  custom?: Record<string, number>
 }
 
 export type AngleOptions = FillOptions

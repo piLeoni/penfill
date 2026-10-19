@@ -20,10 +20,11 @@ source files. Source code is authoritative.
 
 - **Units**: millimetres everywhere; `Pt = (f64, f64)`, `Strokes = Vec<Vec<Pt>>`.
 - **Public surface**: re-exports in `src/lib.rs` — `Anchor`, `Frame`, `Origin`,
-  `Region`, `Strokes`, `polyline_length`, `fill_solid`, `Canvas`, `Tools`,
-  `FillParams`, `FillOutput`, `EdgeMode`, `fill_pattern`, `fill_pattern_with`,
-  `fill_pattern_output`, `fill_by_name`, `fill_output_by_name`, `all_fill_names`,
-  `FILL_NAMES`, `Clipped`, `Frayed`, `Meter`, `Sink`.
+  `Region`, `Strokes`, `polyline_length`, `fill_solid`, `Canvas`, `CustomParams`,
+  `Tools`, `FillParams`, `FillOutput`, `EdgeMode`, `fill_pattern`,
+  `fill_pattern_with`, `fill_pattern_output`, `fill_by_name`,
+  `fill_output_by_name`, `all_fill_names`, `FILL_NAMES`, `Clipped`, `Frayed`,
+  `Meter`, `Sink`.
 - **`MIN_SEGMENT_MM`** (`src/geo.rs`): strokes shorter than this are dropped
   as rounding artefacts, not ink.
 - **Seeding**: every random fill takes `seed: u64`; the same seed gives the
