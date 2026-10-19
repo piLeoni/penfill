@@ -37,6 +37,63 @@ pub enum EdgeMode {
 }
 
 /// Standardized parameters shared across pattern fills.
+/// Inline key-value map (`Copy`, zero heap allocation) for pattern-specific
+/// parameters (`custom: { jaggedness: 1.2, coverage: 0.7, scatter: 0.4, ... }`)
+/// passed alongside the standardized [`FillParams`] fields.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct CustomParams {
+    entries: [([u8; 16], f64); 8],
+    len: usize,
+}
+
+impl CustomParams {
+    pub const fn new() -> Self {
+        Self {
+            entries: [([0u8; 16], 0.0); 8],
+            len: 0,
+        }
+    }
+
+    fn pack_key(key: &str) -> [u8; 16] {
+        let mut buf = [0u8; 16];
+        let bytes = key.as_bytes();
+        let n = bytes.len().min(16);
+        buf[..n].copy_from_slice(&bytes[..n]);
+        buf
+    }
+
+    /// Insert or update a custom parameter (`key` up to 16 ASCII bytes).
+    pub fn set(&mut self, key: &str, value: f64) {
+        let k = Self::pack_key(key);
+        for i in 0..self.len {
+            if self.entries[i].0 == k {
+                self.entries[i].1 = value;
+                return;
+            }
+        }
+        if self.len < self.entries.len() {
+            self.entries[self.len] = (k, value);
+            self.len += 1;
+        }
+    }
+
+    /// Look up a custom parameter by name.
+    pub fn get(&self, key: &str) -> Option<f64> {
+        let k = Self::pack_key(key);
+        for i in 0..self.len {
+            if self.entries[i].0 == k {
+                return Some(self.entries[i].1);
+            }
+        }
+        None
+    }
+
+    /// Look up a custom parameter by name, falling back to `default`.
+    pub fn get_or(&self, key: &str, default: f64) -> f64 {
+        self.get(key).unwrap_or(default)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FillParams {
     /// Primary pitch, line spacing, cell size, or stone size in mm.
@@ -53,6 +110,8 @@ pub struct FillParams {
     pub edge: EdgeMode,
     /// Smooth perimeter disappearing band in mm (`0.0` = hard cut).
     pub fray: f64,
+    /// Pattern-specific custom variables (`custom: { ... }`).
+    pub custom: CustomParams,
 }
 
 impl Default for FillParams {
@@ -65,6 +124,7 @@ impl Default for FillParams {
             inset: None,
             edge: EdgeMode::Clip,
             fray: 0.0,
+            custom: CustomParams::new(),
         }
     }
 }
@@ -110,6 +170,17 @@ impl FillParams {
     pub fn fray(mut self, fray: f64) -> Self {
         self.fray = fray;
         self
+    }
+
+    /// Set a pattern-specific custom parameter (e.g. `.custom("jaggedness", 1.2)`).
+    pub fn custom(mut self, key: &str, value: f64) -> Self {
+        self.custom.set(key, value);
+        self
+    }
+
+    /// Read a pattern-specific custom parameter, or `default` if unset.
+    pub fn get_custom(&self, key: &str, default: f64) -> f64 {
+        self.custom.get_or(key, default)
     }
 
     /// Resolve the base region after applying `inset` (or `default_inset` if `None`).
@@ -173,6 +244,15 @@ pub struct Canvas<'a> {
     pub edge: EdgeMode,
     /// Smooth perimeter disappearing band in mm (`0.0` = off).
     pub fray: f64,
+    /// Pattern-specific custom variables (`custom: { ... }`).
+    pub custom: CustomParams,
+}
+
+impl<'a> Canvas<'a> {
+    /// Read a custom parameter from `self.custom`, falling back to `default`.
+    pub fn param(&self, key: &str, default: f64) -> f64 {
+        self.custom.get_or(key, default)
+    }
 }
 
 /// The standard-library toolkit: what the built-in fills are made of, set to
@@ -818,6 +898,7 @@ fn run_pattern(
         origin,
         edge: params.edge,
         fray: params.fray,
+        custom: params.custom,
     };
     let prev_mask = ACTIVE_MASK.with(|m| m.borrow().clone());
     let mask_rc = if collect_mask {
@@ -1094,15 +1175,8 @@ fn fill_named(
                 out.strokes
             }
             "isoline_stack" => {
-                let crown = (s * 3.5).max(1.5);
-                let p = crate::isoline_stack::IsolineStackParams {
-                    seed,
-                    crown,
-                    bubble: (crown * 0.30).max(0.4),
-                    edge: c.edge,
-                    fray: 0.0,
-                    ..Default::default()
-                };
+                let crown = (s * 4.2).max(3.6);
+                let p = crate::isoline_stack::IsolineStackParams::from_fill_params(&inner, crown);
                 let out = crate::isoline_stack::fill_isoline_stack_with_coverage(c.region, &p);
                 t.add_mask(&out.coverage);
                 out.strokes

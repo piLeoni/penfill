@@ -385,7 +385,7 @@ fn catalog() -> Vec<Pattern> {
 
         // --- Organic Contours & Differential Growth ---
         p(Organic, "isoline blobs", "isoline-blobs", "isoline_blobs", 0.75, false, 0.0, COARSE_MM, "nested eccentric contour rings around scattered sites"),
-        p(Organic, "isoline stack", "isoline-stack", "isoline_stack", 0.85, false, 0.0, COARSE_MM, "occluding metaball clusters with concentric contour stacks"),
+        p(Organic, "isoline stack", "isoline-stack", "isoline_stack", 0.85, false, 0.0, COARSE_MM, "layered forest canopy with concentric domes and ruffled foliage blobs"),
         p(Organic, "growth", "growth", "growth", 0.65, false, 0.0, COARSE_MM, "differential-growth meandering and branching curves"),
 
         // --- Geology (Map Lithologies) ---

@@ -66,47 +66,29 @@ No `random::poisson_disk` — site placement for the procedural case comes from 
 
 ## Stacked slices (`src/isoline_stack.rs`)
 
-The flat field above can only nest: every level sits inside the one below, so nothing ever overhangs. Vegetation needs upper layers that are **wider** than what is under them and hide it. `isoline_stack` gets that from a 3D model:
+Models each tree crown from above as a 3D cluster of overlapping, jagged foliage tiers (`fronde` / sub-boughs) rather than Wyvill metaball bubbles or concentric parallel offsets:
 
-- Each crown is a dome of spheres (Wyvill metaballs, `(1 - d²/r²)³`, so touching spheres melt into one lumpy surface): higher and larger toward the middle. `bubble` sets sphere size (lumpiness), `crown` the crown size.
-- The volume is cut into `slices` horizontal planes. Each slice's outline is one `fill_isolines` call at `ISO` over a frame around all spheres; per slice only the spheres it cuts are bucketed in a hash grid.
-- Painter's order, top slice first: a slice's outline is clipped to *outside* the union of the slices above it (`frame.difference(&above)`), then the slice joins `above` (`Region::from_rings_even_odd`, `Region::union`). A crown standing higher than its neighbour hides that neighbour's rings where it overhangs.
-- Jitter: the sample is domain-warped and the field multiplied by `1 + jitter·noise`, both noises shifted with `z` so the wobble changes from slice to slice.
+- **Decoupled 2D Perlin FBM circle + botanical scallop radial profile (`build_jagged_ring_layer`)**: each contour tier `k` (`u_norm in [0, 1]`) samples multi-scale 2D Perlin FBM along non-shrinking circles in noise space (`rho_macro = 1.20`, `rho_meso ≈ 1.7..2.15`, `rho_micro ≈ 2.3..3.6`) whose noise origin steps substantially from layer `k` to `k + 1`. Combined with botanical `|sin|^0.62` leaf scallops and 2–3 deep inward bough clefts (`insenature`), every inner contour maintains rich concavities and convexities independent of the outer skirt.
+- **Directional sunlight & 3D C-arc billows (`Light`, enabled by default)**: `IsolineStackParams::default()` enables `Light { from_deg: -45.0, strength: 0.82, elevation_deg: 35.0, hatch: 0.0 }`. Upper tiers drift toward the shadowed flank (`(-lx, -ly)`) and open into scalloped crescent C-arcs on the sunlit flank (`is_open_arc` + `facing_sun > thresh`), plus 2–3 off-center internal sub-bough puffs (`fronde`), so trees never render as closed 360° concentric "artichoke" rings.
+- **Gradual grove-to-clearing scattering (`generate_forest_layers`)**: Poisson-disk candidates are ranked by a multi-scale grove field + stochastic scatter with transition width scaled by `coverage.sqrt()`, tapering both acceptance probability and crown radius (`size_factor`) from dense grove cores (`coverage = 1.0`) down to sparse 10% pioneer groves and isolated satellite shrubs (`coverage = 0.10`).
+- **Fast $O(1)$ analytical LUT occlusion + spatial de-overlap (`SpatialOccluder`, `deoverlap_strokes`)**: each `JaggedLayer` precomputes a 144-bin polar radius lookup table (`lut`) indexed in a 2D uniform grid for $O(1)$ hidden-line removal (with 4-step bisection at occlusion crossings), followed by a spatial-hash `deoverlap_strokes` pass and greedy nearest-endpoint ordering for fast pen-plotter traversal (~25 ms per forest vs ~4 s previously).
+- **Watertight closed `coverage` mask (`FillWithCoverage.coverage` / `FillOutput.mask`)**: even when outer perimeters (`is_base_footprint`) have sunlit highlight breaks in `out.strokes`, `out.coverage` is unioned from the un-gapped 360° closed `layer.ring` footprints (`Region::from_polygons`), guaranteeing a 100% closed polygon surface for DrawLand / downstream layer clipping.
 
-`EdgeMode`:
+### Parameters & `CustomParams` keys
 
-| Mode | Placement | Guarantee |
-| --- | --- | --- |
-| `Clip` | crowns over the region grown by one crown | strokes cut at the boundary |
-| `Inside` | crowns in the region plus a lining row `crown · 0.55` inside every ring (so narrow woods fill); spheres shrunk to fit | field faded to zero **at** the boundary: every outline closes inside, none is cut |
-| `Overflow(m)` | plus a row of crowns standing on every boundary ring | field faded to zero `m` mm **outside**: outlines close within `m` past the border |
+`IsolineStackParams` and `FillParams.custom` (`fill_isoline_stack_params`) support:
+- `crown` (`"crown"` or `FillParams.spacing`): typical crown radius in mm.
+- `bubble` (`"bubble"`): leaf-cluster scallop scale in mm.
+- `coverage` (`"coverage"`): `0.0..=1.0` share of the region covered by crowns (`0.10` = 10% sparse trees, `1.00` = 100% continuous canopy).
+- `slices` (`"slices"`): vertical contour tiers (`2..=18`, default `9`).
+- `jitter` (`"jaggedness"` or `"jitter"`): contour jaggedness (`0.0..=2.2`, default `0.88`).
+- `elongation` (`"elongation"`): crown elliptical anisotropy (`0.0..=1.0`, default `0.15`).
+- `lobes` (`"lobes"`): depth and prominence of major bough clefts and compound sub-crowns (`0.0..=2.5`, default `1.0`).
+- `light` (`"light"` strength `0.0..=1.0`, default `0.82`; `"light_angle"` degrees, default `-45.0`).
 
-The fade (`Fade`) is a coarse grid of signed boundary distances, interpolated and smoothstepped over `bubble · 0.35`; it is evaluated at the *unwarped* sample, so the wobble cannot carry ink past the limit. Spheres are first shrunk so their support radius is at most `room / 0.95` (`fit_to_limit`): each one rounds off well before the limit and the fade only catches what merging pushes further. Letting spheres reach the limit makes neighbours merge into one outline pressed flat along the border, which reads as a cut.
-
-`coverage` (0–1) thins generated crowns with low-frequency noise into woods and clearings; `CrownSource::Crowns` takes known crowns (position, radius, height) instead. The returned `coverage` region is the union of every slice — the canopy's footprint, for masks.
-
-Tests: `draws_inside_the_region`, `inside_mode_never_touches_the_boundary`, `overflow_mode_crosses_the_boundary_but_not_far`, `a_higher_wider_bubble_hides_the_rings_under_it`.
-
-Cost: `slices` × (frame area / cell²) field samples; ~4 s for a 120 mm park in release.
-
-### Light (implemented)
-
-`IsolineStackParams.light: Option<Light>` — `Light { from_deg, strength, elevation_deg, hatch }` (`Default`: 135°, 0.8, 35°, 0.4 mm). Two effects. First, sphere bias: one direction for the whole fill: in `crown_balls`, each satellite sphere's radius and height scale by `1 − shade · k` where `shade = strength · dot(unit offset from the crown's centre, light direction)`. Spheres on the far side from the light (`shade < 0`) swell and climb; spheres on the near side thin and flatten. The trunk sphere sits at the crown's own centre, so its offset is zero and it is never shaded. No change to sampling, slicing o`from_deg`: degrees, 0 = +x, 90 = +y, the direction light comes *from*. `strength`: 0–1 (clamped); 0.65 on radius, 0.5 on height at `strength = 1`. Test: `light_makes_the_shadow_side_denser_than_the_lit_side` (run with `hatch: 0`).
-
-Second, shading (`hatch > 0`), via `Surface` in `isoline_stack.rs`: a heightfield on a grid of `(0.2·bubble).clamp(0.12, 0.5)` mm, where each cell takes the height of the topmost slice whose field covers it (`mark`, called per slice) and uncovered cells sit at ground level. `light` box-blurs it twice (radius `0.35·bubble`) so the terraces become a surface, then gives each cell Lambert darkness relative to a flat top under a sun at `elevation_deg`, plus cast shadows: marching toward the sun for up to `3·bubble`, fading with distance and kept half-tone so gaps between crowns don't go black. `hatching` draws lines at `from_deg − 45°`, `hatch` apart, anchored at the origin. Each row has its own darkness threshold (4-row ordered dither), so darker shade gets more rows; a crossing family joins in the deepest shade. `break_highlights` cuts outline runs where the surface faces the sun well above a flat top's light. Test: `shading_hatches_the_side_away_from_the_light`.
-
- it (a bulge that swells past the midline would otherwise get counted on the wrong side).
+Tests: `draws_inside_the_region`, `inside_mode_never_touches_the_boundary`, `overflow_mode_crosses_the_boundary_but_not_far`, `light_makes_the_shadow_side_denser_than_the_lit_side`, `lit_side_has_more_gaps_in_the_rings`, `a_higher_wider_bubble_hides_the_rings_under_it`, `custom_params_control_jaggedness_and_coverage`, `coverage_mask_is_closed_and_covers_crowns_despite_open_sunlit_rims`.
 
 ## Preview
 
-`examples/isoline_blobs_demo.rs` (`cargo run --release --example isoline_blobs_demo`) writes `isoline-blobs-scattered.svg` and `isoline-stack-{clip,inside,overflow,dense,lit}.svg` (an irregular park with a pond hole) to `examples/gallery/`. Copies live in draw.land's docs.
+`examples/isoline_blobs_demo.rs` (`cargo run --release --example isoline_blobs_demo`) writes `isoline-blobs-scattered.svg`, `isoline-stack-{clip,inside,overflow,dense,lit}.svg`, `forest-canopy-showcase.svg`, `forest-variations-density-light.svg`, and `forest-variations-species-mask.svg` to `examples/gallery/`.
 
-## Open follow-ups
-
-- Light on `isoline_blobs` (the flat field) — not implemented; only `isoline_stack` has `Light` today.
-- Streaming (`_into` + `Sink`) — not implemented; whole-field sampling today, fine at map-fill scales tried so far, revisit if a host area makes memory a concern.
-- Bindings (Python/Node/WASM) — not exposed yet; follow the pattern of other `field`-based fills (`textures::fill_marble`) once the Rust API is considered stable.
-
-## Gallery
-
-Row added in `examples/gallery.rs` under slug `isoline-blobs` (uses `default_params`); regenerate with `cargo run --example gallery --features image`.
