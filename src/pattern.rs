@@ -1166,8 +1166,28 @@ fn fill_named(
             "vines" => crate::nature::draw_vines(c, t),
             "growth" => crate::growth::fill_growth_params(c.region, &inner).strokes,
             "isoline_blobs" => {
-                let mut p =
-                    crate::isoline_blobs::default_params((s * 4.0).max(2.0), s.max(0.25), seed);
+                let feature_size = inner.custom.get_or("feature_size", (s * 4.0).max(2.0));
+                let mut p = crate::isoline_blobs::default_params(feature_size, s.max(0.25), seed);
+                if let Some(w) = inner
+                    .custom
+                    .get("warp")
+                    .or_else(|| inner.custom.get("jitter"))
+                    .or_else(|| inner.custom.get("jitter_intensity"))
+                    .or_else(|| inner.custom.get("intensity"))
+                {
+                    p.warp = w.max(0.0);
+                }
+                if let Some(wp) = inner
+                    .custom
+                    .get("warp_period")
+                    .or_else(|| inner.custom.get("jitter_period"))
+                    .or_else(|| inner.custom.get("period"))
+                {
+                    p.warp_period = wp.clamp(0.20, 4.0);
+                }
+                if let Some(th) = inner.custom.get("threshold") {
+                    p.threshold = th;
+                }
                 p.edge = c.edge;
                 p.fray = 0.0;
                 let out = crate::isoline_blobs::fill_isoline_blobs_with_coverage(c.region, &p);

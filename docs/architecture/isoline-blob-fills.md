@@ -66,24 +66,30 @@ No `random::poisson_disk` — site placement for the procedural case comes from 
 
 ## Stacked slices (`src/isoline_stack.rs`)
 
-Models each tree crown from above as a 3D cluster of overlapping, jagged foliage tiers (`fronde` / sub-boughs) rather than Wyvill metaball bubbles or concentric parallel offsets:
+Models each tree crown from above as a 3D cluster of overlapping, jagged foliage tiers and sub-boughs rather than Wyvill metaball bubbles or concentric parallel offsets:
 
-- **Decoupled 2D Perlin FBM circle + botanical scallop radial profile (`build_jagged_ring_layer`)**: each contour tier `k` (`u_norm in [0, 1]`) samples multi-scale 2D Perlin FBM along non-shrinking circles in noise space (`rho_macro = 1.20`, `rho_meso ≈ 1.7..2.15`, `rho_micro ≈ 2.3..3.6`) whose noise origin steps substantially from layer `k` to `k + 1`. Combined with botanical `|sin|^0.62` leaf scallops and 2–3 deep inward bough clefts (`insenature`), every inner contour maintains rich concavities and convexities independent of the outer skirt.
-- **Directional sunlight & 3D C-arc billows (`Light`, enabled by default)**: `IsolineStackParams::default()` enables `Light { from_deg: -45.0, strength: 0.82, elevation_deg: 35.0, hatch: 0.0 }`. Upper tiers drift toward the shadowed flank (`(-lx, -ly)`) and open into scalloped crescent C-arcs on the sunlit flank (`is_open_arc` + `facing_sun > thresh`), plus 2–3 off-center internal sub-bough puffs (`fronde`), so trees never render as closed 360° concentric "artichoke" rings.
-- **Gradual grove-to-clearing scattering (`generate_forest_layers`)**: Poisson-disk candidates are ranked by a multi-scale grove field + stochastic scatter with transition width scaled by `coverage.sqrt()`, tapering both acceptance probability and crown radius (`size_factor`) from dense grove cores (`coverage = 1.0`) down to sparse 10% pioneer groves and isolated satellite shrubs (`coverage = 0.10`).
-- **Fast $O(1)$ analytical LUT occlusion + spatial de-overlap (`SpatialOccluder`, `deoverlap_strokes`)**: each `JaggedLayer` precomputes a 144-bin polar radius lookup table (`lut`) indexed in a 2D uniform grid for $O(1)$ hidden-line removal (with 4-step bisection at occlusion crossings), followed by a spatial-hash `deoverlap_strokes` pass and greedy nearest-endpoint ordering for fast pen-plotter traversal (~25 ms per forest vs ~4 s previously).
-- **Watertight closed `coverage` mask (`FillWithCoverage.coverage` / `FillOutput.mask`)**: even when outer perimeters (`is_base_footprint`) have sunlit highlight breaks in `out.strokes`, `out.coverage` is unioned from the un-gapped 360° closed `layer.ring` footprints (`Region::from_polygons`), guaranteeing a 100% closed polygon surface for DrawLand / downstream layer clipping.
+- **Asymmetric multi-bough structural envelope (`BoughLobe`)**: each crown generates 3–5 asymmetric primary boughs with flat-crested `(1 - u^4)` plateaus, uneven angular widths, and V-clefts that recede at different elevation cutoffs `max_u`, plus same-elevation crown fusion (`SpatialOccluder`) and companion sub-crowns so touching trees merge into kidney-, L-, and sprawling grove silhouettes rather than round polka-dot bubbles.
+- **Categorized jittering — Period vs Intensity (`build_jagged_ring_layer`)**:
+  - **Jitter Period (`jitter_period`, custom `"jitter_period"` / `"period"`)** controls *how many control points* (`n_ctrl`) around each contour are sampled and displaced (`step_mm ∝ crown * jitter_period`), as well as the spatial wavelength in 2D Perlin space.
+  - **Jitter Intensity (`jitter`, custom `"jitter"` / `"jitter_intensity"` / `"intensity"` / `"jaggedness"`)** controls *how far* those control points are displaced (combining flat-crested outward FBM facets, deepened inward notches, discrete ridge kicks, and tangential shifts), connected with a single asymmetric bevel pass (`0.08` on inward notches, `0.22` on outward facets) and zero sinusoidal bubble waves.
+- **Directional sunlight & 3D C-arc billows (`Light`, enabled by default)**: `IsolineStackParams::default()` enables `Light { from_deg: -45.0, strength: 0.82, elevation_deg: 35.0, hatch: 0.0 }`. Upper tiers drift toward the shadowed flank (`(-lx, -ly)`) and open into cascading C-arcs on the sunlit flank (`is_open_arc` + `facing_sun > thresh`, stopping at `rad_scale >= 0.22` to avoid pinhole center loops), plus 1–2 broad internal bough-crease arcs.
+- **Optional perpendicular slope ticks (`ticks` / `Light.hatch`, `append_perpendicular_ticks`)**: short cross-contour hachure strokes along the local inward normal at bough cleft cusps and shadowed slopes, stopping ~70–82% across the inter-tier gap so `deoverlap_strokes` keeps them crisp.
+- **Gradual grove-to-clearing scattering (`generate_forest_layers`)**: Poisson-disk candidates are ranked by a multi-scale grove field + stochastic scatter with transition width scaled by `coverage.sqrt()`, tapering both acceptance probability and crown radius (`size_factor`) from dense grove cores (`coverage = 1.0`) down to sparse 10% pioneer groves (`coverage = 0.10`).
+- **Fast $O(1)$ analytical LUT occlusion + spatial de-overlap (`SpatialOccluder`, `deoverlap_strokes`)**: each `JaggedLayer` precomputes a 144-bin polar radius lookup table (`lut`) indexed in a 2D uniform grid for $O(1)$ hidden-line removal and same-level crown fusion (with 4-step bisection at occlusion crossings), followed by a spatial-hash `deoverlap_strokes` pass and greedy nearest-endpoint ordering for fast pen-plotter traversal.
+- **Watertight closed `coverage` mask (`FillWithCoverage.coverage` / `FillOutput.mask`)**: even when outer perimeters (`is_base_footprint`) have sunlit highlight breaks in `out.strokes`, `out.coverage` is unioned from the un-gapped 360° closed `layer.ring` footprints (`Region::from_polygons`), guaranteeing a 100% closed polygon surface for DrawLand / downstream layer clipping (and can also be stroked directly if a continuous 360° outer silhouette is desired).
 
 ### Parameters & `CustomParams` keys
 
 `IsolineStackParams` and `FillParams.custom` (`fill_isoline_stack_params`) support:
 - `crown` (`"crown"` or `FillParams.spacing`): typical crown radius in mm.
-- `bubble` (`"bubble"`): leaf-cluster scallop scale in mm.
+- `bubble` (`"bubble"`): leaf-cluster scale in mm.
 - `coverage` (`"coverage"`): `0.0..=1.0` share of the region covered by crowns (`0.10` = 10% sparse trees, `1.00` = 100% continuous canopy).
 - `slices` (`"slices"`): vertical contour tiers (`2..=18`, default `9`).
-- `jitter` (`"jaggedness"` or `"jitter"`): contour jaggedness (`0.0..=2.2`, default `0.88`).
-- `elongation` (`"elongation"`): crown elliptical anisotropy (`0.0..=1.0`, default `0.15`).
+- `jitter` (`"jitter"`, `"jitter_intensity"`, `"intensity"`, or `"jaggedness"`): jitter displacement intensity (`0.0..=2.5`, default `1.10`).
+- `jitter_period` (`"jitter_period"` or `"period"`): jitter spatial wavelength / point spacing (`0.2..=4.0`, default `0.68`; smaller = more points jittered).
+- `elongation` (`"elongation"`): crown elliptical anisotropy (`0.0..=1.0`, default `0.18`).
 - `lobes` (`"lobes"`): depth and prominence of major bough clefts and compound sub-crowns (`0.0..=2.5`, default `1.0`).
+- `ticks` (`"ticks"`, `"perpendicular"`, or `"hachures"`): density of perpendicular cross-contour slope ticks (`0.0..=1.5`, default `0.42`).
 - `light` (`"light"` strength `0.0..=1.0`, default `0.82`; `"light_angle"` degrees, default `-45.0`).
 
 Tests: `draws_inside_the_region`, `inside_mode_never_touches_the_boundary`, `overflow_mode_crosses_the_boundary_but_not_far`, `light_makes_the_shadow_side_denser_than_the_lit_side`, `lit_side_has_more_gaps_in_the_rings`, `a_higher_wider_bubble_hides_the_rings_under_it`, `custom_params_control_jaggedness_and_coverage`, `coverage_mask_is_closed_and_covers_crowns_despite_open_sunlit_rims`.

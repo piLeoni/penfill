@@ -46,7 +46,7 @@ fn write_density_and_light_variations(path: &str) {
         (h * 4.5) as usize,
     );
     s.push_str(&format!("<rect x='0' y='0' width='{w}' height='{h}' fill='#f6f2e8'/>\n"));
-    s.push_str("<text x='10' y='9' font-family='Georgia, serif' font-size='4.4' font-weight='bold' fill='#2a251f'>Variazioni di Intensità (10% – 100% alberi) e Luminosità Solare</text>\n");
+    s.push_str("<text x='10' y='9' font-family='Georgia, serif' font-size='4.4' font-weight='bold' fill='#2a251f'>Canopy Coverage (10% – 100% trees) and Directional Sunlight Variations</text>\n");
 
     let rect_panel = |x0: f64, y0: f64, pw: f64, ph: f64| -> Region {
         Region::from_ring(&[(x0, y0), (x0 + pw, y0), (x0 + pw, y0 + ph), (x0, y0 + ph)])
@@ -61,7 +61,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[0],
             rows[0],
-            "1A. Intensità 10% (coverage = 0.10)",
+            "1A. 10% Coverage (coverage = 0.10)",
             IsolineStackParams {
                 seed: 42,
                 crown: 6.2,
@@ -75,7 +75,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[1],
             rows[0],
-            "1B. Intensità 45% (coverage = 0.45)",
+            "1B. 45% Coverage (coverage = 0.45)",
             IsolineStackParams {
                 seed: 42,
                 crown: 6.2,
@@ -89,7 +89,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[2],
             rows[0],
-            "1C. Intensità 100% (coverage = 1.00)",
+            "1C. 100% Coverage (coverage = 1.00)",
             IsolineStackParams {
                 seed: 42,
                 crown: 6.2,
@@ -103,7 +103,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[0],
             rows[1],
-            "2A. Bassa Luminosità (light = 0.25)",
+            "2A. Low Sunlight (light = 0.25)",
             IsolineStackParams {
                 seed: 19,
                 crown: 6.4,
@@ -118,7 +118,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[1],
             rows[1],
-            "2B. Media Luminosità (light = 0.65)",
+            "2B. Medium Sunlight (light = 0.65)",
             IsolineStackParams {
                 seed: 19,
                 crown: 6.4,
@@ -133,7 +133,7 @@ fn write_density_and_light_variations(path: &str) {
         (
             cols[2],
             rows[1],
-            "2C. Alta Luminosità (light = 0.95)",
+            "2C. Strong Sunlight (light = 0.95)",
             IsolineStackParams {
                 seed: 19,
                 crown: 6.4,
@@ -151,7 +151,7 @@ fn write_density_and_light_variations(path: &str) {
         let host = rect_panel(px, py, pw, ph);
         let out = fill_isoline_stack_with_coverage(&host, &params);
         s.push_str(&format!(
-            "<text x='{px}' y='{}' font-family='Georgia, serif' font-size='3.1' fill='#3b352c'>{title} · {} tratti</text>\n",
+            "<text x='{px}' y='{}' font-family='Georgia, serif' font-size='3.1' fill='#3b352c'>{title} · {} strokes</text>\n",
             py - 2.2,
             out.strokes.len()
         ));
@@ -171,8 +171,8 @@ fn write_density_and_light_variations(path: &str) {
 }
 
 /// Sheet 2: 2x3 grid comparing:
-/// - Row 1: Jittering / jaggedness variations (0.28 soft park vs 0.88 deciduous oak vs 1.65 spiky conifer)
-/// - Row 2: Shape variations (`lobes`, `elongation`) + Closed coverage mask (`out.coverage`) cutting underlying terrain
+/// - Row 1: Jitter Period (`jitter_period`: how many points are jittered) & Jitter Intensity (`jitter`: displacement)
+/// - Row 2: Compound bough lobes (`lobes`), perpendicular slope ticks (`ticks`), and closed `coverage` mask + perimeter outline
 fn write_species_and_mask_variations(path: &str) {
     let w = 310.0;
     let h = 212.0;
@@ -182,7 +182,7 @@ fn write_species_and_mask_variations(path: &str) {
         (h * 4.5) as usize,
     );
     s.push_str(&format!("<rect x='0' y='0' width='{w}' height='{h}' fill='#f6f2e8'/>\n"));
-    s.push_str("<text x='10' y='9' font-family='Georgia, serif' font-size='4.4' font-weight='bold' fill='#2a251f'>Variazioni di Jittering, Forma Vegetazionale e Maschera Chiusa (coverage)</text>\n");
+    s.push_str("<text x='10' y='9' font-family='Georgia, serif' font-size='4.4' font-weight='bold' fill='#2a251f'>Jitter Categories (Period vs Intensity), Perpendicular Ticks, and Closed Mask</text>\n");
 
     let rect_panel = |x0: f64, y0: f64, pw: f64, ph: f64| -> Region {
         Region::from_ring(&[(x0, y0), (x0 + pw, y0), (x0 + pw, y0 + ph), (x0, y0 + ph)])
@@ -197,17 +197,18 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[0],
             rows[0],
-            "3A. Jitter Morbido (0.48) · Chiome Tondeggianti",
+            "3A. Long Period (1.75) · Medium Intensity (0.65)",
             false,
             IsolineStackParams {
                 seed: 27,
                 crown: 6.4,
-                bubble: 2.2,
+                bubble: 2.0,
                 coverage: 0.62,
                 slices: 9,
-                jitter: 0.48,
-                lobes: 0.65,
-                elongation: 0.08,
+                jitter: 0.65,
+                jitter_period: 1.75,
+                lobes: 0.90,
+                elongation: 0.16,
                 edge: EdgeMode::Inside,
                 ..Default::default()
             },
@@ -215,7 +216,7 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[1],
             rows[0],
-            "3B. Medio Jitter (0.88) · Querceto / Faggio",
+            "3B. Medium Period (1.00) · Deciduous Intensity (0.95)",
             false,
             IsolineStackParams {
                 seed: 27,
@@ -223,9 +224,10 @@ fn write_species_and_mask_variations(path: &str) {
                 bubble: 1.8,
                 coverage: 0.62,
                 slices: 9,
-                jitter: 0.88,
-                lobes: 1.05,
-                elongation: 0.15,
+                jitter: 0.95,
+                jitter_period: 1.00,
+                lobes: 1.10,
+                elongation: 0.18,
                 edge: EdgeMode::Inside,
                 ..Default::default()
             },
@@ -233,7 +235,7 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[2],
             rows[0],
-            "3C. Alto Jitter (1.65) · Conifere / Abetaia",
+            "3C. Short Period (0.45) · High Intensity (1.55)",
             false,
             IsolineStackParams {
                 seed: 27,
@@ -241,9 +243,10 @@ fn write_species_and_mask_variations(path: &str) {
                 bubble: 1.15,
                 coverage: 0.62,
                 slices: 10,
-                jitter: 1.65,
-                lobes: 0.70,
-                elongation: 0.10,
+                jitter: 1.55,
+                jitter_period: 0.45,
+                lobes: 0.85,
+                elongation: 0.14,
                 edge: EdgeMode::Inside,
                 ..Default::default()
             },
@@ -251,7 +254,7 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[0],
             rows[1],
-            "4A. Chiome Lobate Composte (lobes = 1.75)",
+            "4A. Compound Fused Boughs (lobes = 1.75, period = 0.85)",
             false,
             IsolineStackParams {
                 seed: 31,
@@ -259,9 +262,10 @@ fn write_species_and_mask_variations(path: &str) {
                 bubble: 1.7,
                 coverage: 0.58,
                 slices: 10,
-                jitter: 1.05,
+                jitter: 1.08,
+                jitter_period: 0.85,
                 lobes: 1.75,
-                elongation: 0.20,
+                elongation: 0.22,
                 edge: EdgeMode::Inside,
                 ..Default::default()
             },
@@ -269,17 +273,19 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[1],
             rows[1],
-            "4B. Chiome Allungate (elongation = 0.65)",
+            "4B. Short Period + Perpendicular Slope Ticks (ticks = 0.85)",
             false,
             IsolineStackParams {
-                seed: 31,
-                crown: 6.5,
-                bubble: 1.8,
-                coverage: 0.58,
+                seed: 27,
+                crown: 6.2,
+                bubble: 1.35,
+                coverage: 0.62,
                 slices: 9,
-                jitter: 0.92,
-                lobes: 1.0,
-                elongation: 0.65,
+                jitter: 1.35,
+                jitter_period: 0.52,
+                lobes: 1.15,
+                ticks: 0.85,
+                elongation: 0.18,
                 edge: EdgeMode::Inside,
                 ..Default::default()
             },
@@ -287,7 +293,7 @@ fn write_species_and_mask_variations(path: &str) {
         (
             cols[2],
             rows[1],
-            "4C. Maschera Chiusa (coverage) Taglia Sfondo",
+            "4C. Closed Mask (coverage) Cuts Terrain + Outlines Perimeter",
             true,
             IsolineStackParams {
                 seed: 31,
@@ -295,7 +301,8 @@ fn write_species_and_mask_variations(path: &str) {
                 bubble: 1.8,
                 coverage: 0.55,
                 slices: 10,
-                jitter: 0.92,
+                jitter: 0.95,
+                jitter_period: 0.95,
                 edge: EdgeMode::Inside,
                 light: Some(Light { from_deg: -45.0, strength: 0.90, ..Light::default() }),
                 ..Default::default()

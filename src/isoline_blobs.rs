@@ -72,9 +72,12 @@ pub struct IsolineFieldParams {
     pub feature_size: f64,
     /// Target distance between nested contour lines, in mm.
     pub contour_spacing: f64,
-    /// 0 (smooth, calm) upward — domain-warp strength; higher reads jumpier
-    /// and more hand-drawn.
+    /// 0 (smooth, calm) upward — domain-warp / jitter intensity; higher displaces
+    /// contour points further.
     pub warp: f64,
+    /// 0.2 – 4.0: jitter period — spatial wavelength of the domain warp (`1.0` default;
+    /// smaller = more points jittered along each contour, larger = broader waves).
+    pub warp_period: f64,
     /// Field height where ink begins (paper below, nested rings above).
     /// Raising it shrinks coverage down to just the tallest peaks; lowering
     /// it grows and fuses clusters into fewer, bigger connected masses.
@@ -93,6 +96,7 @@ impl Default for IsolineFieldParams {
             feature_size: 12.0,
             contour_spacing: 0.5,
             warp: 0.45,
+            warp_period: 1.0,
             threshold: 0.25,
             edge: EdgeMode::Clip,
             fray: 0.0,
@@ -120,8 +124,28 @@ pub fn fill_isoline_blobs(region: &Region, feature_size: f64, contour_spacing: f
 pub fn fill_isoline_blobs_params(region: &Region, params: &FillParams) -> FillOutput {
     let target = params.resolve_region(region, 0.0);
     let contour_spacing = params.spacing.max(0.05);
-    let feature_size = (contour_spacing * 16.0).max(4.0);
+    let feature_size = params.custom.get_or("feature_size", (contour_spacing * 16.0).max(4.0));
     let mut p = default_params(feature_size, contour_spacing, params.seed);
+    if let Some(w) = params
+        .custom
+        .get("warp")
+        .or_else(|| params.custom.get("jitter"))
+        .or_else(|| params.custom.get("jitter_intensity"))
+        .or_else(|| params.custom.get("intensity"))
+    {
+        p.warp = w.max(0.0);
+    }
+    if let Some(wp) = params
+        .custom
+        .get("warp_period")
+        .or_else(|| params.custom.get("jitter_period"))
+        .or_else(|| params.custom.get("period"))
+    {
+        p.warp_period = wp.clamp(0.20, 4.0);
+    }
+    if let Some(th) = params.custom.get("threshold") {
+        p.threshold = th;
+    }
     p.edge = params.edge;
     p.fray = params.fray;
     fill_isoline_blobs_with_coverage(&target, &p).into()
@@ -141,6 +165,8 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
     let ambient = Perlin::new(p.seed);
     let warp_x = Perlin::new(p.seed.wrapping_add(101));
     let warp_y = Perlin::new(p.seed.wrapping_add(202));
+    let warp_period = p.warp_period.clamp(0.20, 4.0);
+    let warp_scale = (feature * warp_period).max(1e-6);
     let warp_amt = p.warp.max(0.0) * feature * 0.35;
 
     let use_noise = !matches!(p.source, FieldSource::Sites(_));
@@ -151,8 +177,8 @@ pub fn fill_isoline_blobs_with_coverage(region: &Region, p: &IsolineFieldParams)
 
     let field = |pt: Pt| -> f64 {
         let (wx, wy) = if warp_amt > 0.0 {
-            let u = pt.0 / feature;
-            let v = pt.1 / feature;
+            let u = pt.0 / warp_scale;
+            let v = pt.1 / warp_scale;
             let dx = warp_x.fbm(u, v, 2);
             let dy = warp_y.fbm(u + 5.2, v - 3.1, 2);
             (pt.0 + warp_amt * dx, pt.1 + warp_amt * dy)

@@ -98,7 +98,7 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
 | `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage`, `fill_isoline_blobs_params` | flat: contours of one 2D noise/metaball field; supports `EdgeMode`, `fray`, and `FillOutput` mask — see [isoline-blob-fills.md](isoline-blob-fills.md) |
-| `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage`, `fill_isoline_stack_params` | 3D forest canopy: jagged foliage tiers (`fronde`), directional sunlight C-arcs, analytical LUT occlusion, and closed `coverage` mask; `EdgeMode::{Clip, Inside, Overflow(mm)}`, `fray`, `CustomParams`, and `FillOutput` |
+| `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage`, `fill_isoline_stack_params` | 3D forest canopy: jagged foliage tiers, directional sunlight C-arcs, optional perpendicular slope ticks, analytical LUT occlusion, and closed `coverage` mask; `EdgeMode::{Clip, Inside, Overflow(mm)}`, `fray`, `CustomParams`, and `FillOutput` |
 
 ## Texture (built on `field.rs` and flow/Voronoi)
 
