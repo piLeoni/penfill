@@ -60,6 +60,10 @@ Poisson-disk / Voronoi based. Take no anchor.
 | `terrazzo.rs` | `fill_terrazzo` | chips of many sizes, ~⅓ dark (hatched, never solid) |
 | `scribble.rs` | `fill_scribble` | two layers (2nd turned ~70–110°), per-line tilt/spacing error, broken into strokes — hand hatching |
 | `nature.rs` | `fill_pebbles`, `fill_leaves`, `fill_sprouts`, `fill_lily_pads`, `fill_canopy`, `fill_fluid_grass`, `fill_tufts(_frayed)`, `fill_twigs(_frayed)`, `fill_vines(_frayed)` | site-plan vector textures; `fill_leaves` delegates to `fill_sprouts` |
+| `doodle.rs` | `fill_doodle_trees`, `fill_doodle_trees_params` (registry `doodle_trees`) | sketch-map tree crowns: one continuous curlicue per crown (uneven loops, sometimes a second tighter lap) plus a shade crescent away from `light_angle`; front (lower) crowns hide those behind; custom `coverage`, `loops`, `shadow`, `light_angle`; `spacing` = crown diameter |
+| `waves_curl.rs` | `fill_curl_waves`, `fill_curl_waves_params` (registry `curl_waves`) | rows of stylised breaking waves: back slope into a spiral hook, one stroke per wave; custom `wavelength`, `curl`, `turns`, `stagger`, `flip`; meant to be loosened with `hand` |
+| `waves_flow.rs` | `fill_flow_waves`, `fill_flow_waves_params` (registry `flow_waves`) | textile-style sea: level sets of `y + A·sin(2πx/λ + P)` with slowly drifting `A`/`P`, so lines bunch and spread but never cross, broken into strokes of uneven length; custom `wavelength`, `amplitude`, `drift`, `breaks` |
+| `waves_scallop.rs` | `fill_scallop_waves`, `fill_scallop_waves_params` (registry `scallop_waves`) | rows of shallow arcs meeting at upward points, one stroke per row; custom `wavelength`, `depth`, `round`, `stagger` |
 
 ## Branching (space colonization)
 

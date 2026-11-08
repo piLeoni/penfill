@@ -11,12 +11,14 @@ pub mod anchor;
 pub mod chess;
 pub mod concentric;
 pub mod dither;
+pub mod doodle;
 pub mod dotswaves;
 pub mod field;
 pub mod fray;
 pub mod geo;
 pub mod grass;
 pub mod growth;
+pub mod hand;
 pub mod hilbert;
 pub mod isoline_blobs;
 pub mod isoline_stack;
@@ -44,10 +46,14 @@ pub mod terrazzo;
 pub mod textures;
 pub mod tile;
 pub mod truchet;
+pub mod waves_curl;
+pub mod waves_flow;
+pub mod waves_scallop;
 pub mod zigzag;
 
 pub use anchor::{Anchor, Frame, Origin};
 pub use geo::{polyline_length, Region, Strokes};
+pub use hand::{hand, HandParams};
 pub use isoline_blobs::{
     fill_isoline_blobs, fill_isoline_blobs_with_coverage, FieldSite, FieldSource, FillWithCoverage, IsolineFieldParams,
 };

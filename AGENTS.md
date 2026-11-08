@@ -20,6 +20,7 @@ draw order. Lines stay inside the region and go around its holes.
 | The ~50 pattern fills | `src/*.rs` | `docs/architecture/fills.md` |
 | Zero-noise primitives: RNG, Perlin, field/isolines | `src/random.rs`, `src/noise.rs`, `src/field.rs` | `docs/architecture/primitives.md` |
 | User-supplied patterns and tiles | `src/pattern.rs`, `src/tile.rs`, `src/pat.rs`, `src/svg.rs` | `docs/architecture/extensibility.md` |
+| Hand-drawn modifier (`hand`, `HandParams`): precise strokes → hand-drawn strokes | `src/hand.rs` | `docs/architecture/primitives.md` |
 | Streaming large fills (`Sink`, `Clipped`, `Meter`) | `src/stream.rs` | `docs/architecture/streaming.md` |
 | Binding layer (Python / Node / wasm) | `bindings/*/src/lib.rs` | `docs/architecture/bindings.md` |
 | Gallery sheets, plot-sheet tooling | `examples/gallery.rs`, `tools/` | `docs/architecture/tooling.md` |
@@ -32,6 +33,15 @@ draw order. Lines stay inside the region and go around its holes.
 - Update the minimal set of docs when a change alters a subsystem's purpose,
   entry points, data flow, public contracts, or invariants. See
   `.cursor/rules/knowledge-base.mdc`.
+
+## Working style: MVP first
+
+New features land in the **Rust core first**, and are judged by looking at
+real output before anything else is built: a `cargo run --example …` sheet
+here, or the draw.land CLI (`drawland map <profile>`) for map styles. Only once
+the result looks right do we carry it through the Python / Node / wasm
+bindings, draw.land's wasm and the web UI. Don't widen a change to every
+binding in the same step unless asked.
 
 ## Build and test
 
