@@ -17,9 +17,11 @@ pub fn whole_at(region: &Region, p: Pt, spacing: f64, fray: f64, noise: &Perlin)
     if !region.covers_point(p) {
         return 0.0;
     }
-    let d = region.dist_to_boundary(p);
     let start = (fray * 0.12).min(spacing * 0.35);
     let band = (fray - start).max(1e-3);
+    // Past `start + band` (plus the wander's reach) the weight is 1 whatever
+    // the distance: no need to search farther.
+    let d = region.dist_to_boundary_within(p, start + band * 1.7);
     let scale = fray.max(spacing * 2.5).max(1.5);
     let wander = noise.fbm(p.0 / scale, p.1 / scale, 2) * 0.65;
     ((d - start) / band + wander).clamp(0.0, 1.0)
@@ -33,7 +35,7 @@ pub fn border_ramp(region: &Region, p: Pt, falloff: f64, rough: f64, noise: &Per
         return 1.0;
     }
     let f = falloff.max(1e-6);
-    let edge = (region.dist_to_boundary(p) / f).clamp(0.0, 1.0);
+    let edge = (region.dist_to_boundary_within(p, f) / f).clamp(0.0, 1.0);
     let n = noise.fbm(p.0 / f, p.1 / f, 2) * 0.5;
     (edge + rough.clamp(0.0, 1.0) * n).clamp(0.0, 1.0)
 }
@@ -93,7 +95,7 @@ pub(crate) fn fray_clipped_stroke(
     // Fast path: if every vertex is well inside the solid core, keep as-is.
     if line
         .iter()
-        .all(|&p| region.dist_to_boundary(p) >= fray * 1.45)
+        .all(|&p| region.dist_to_boundary_within(p, fray * 1.45) >= fray * 1.45)
     {
         sink.stroke(line);
         return;
@@ -235,7 +237,9 @@ pub fn resample(pts: &[Pt], step: f64) -> Vec<Pt> {
     for w in pts.windows(2) {
         let (a, b) = (w[0], w[1]);
         let len = dist(a, b);
-        if len <= 1e-12 {
+        // A degenerate or non-finite step adds nothing (an infinite one
+        // would never end the loop below).
+        if len <= 1e-12 || !len.is_finite() {
             continue;
         }
         let mut at = 0.0;

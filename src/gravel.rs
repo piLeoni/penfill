@@ -70,7 +70,7 @@ pub(crate) fn draw_gravel(canvas: &Canvas, tools: &Tools) -> Strokes {
         EdgeMode::Inside => {
             let small = spacing * 0.4;
             let size = |p: Pt| {
-                let t = (canvas.region.dist_to_boundary(p) / (1.5 * spacing)).clamp(0.0, 1.0);
+                let t = (canvas.region.dist_to_boundary_within(p, 1.5 * spacing) / (1.5 * spacing)).clamp(0.0, 1.0);
                 small + t * (spacing - small)
             };
             poisson_disk_varying(&field, small, spacing, size, canvas.seed)

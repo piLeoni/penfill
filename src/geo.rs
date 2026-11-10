@@ -402,6 +402,15 @@ impl Region {
         self.cutter().distance(p)
     }
 
+    /// [`Self::dist_to_boundary`], but only as far as `cap`: the distance
+    /// when the boundary is closer, `cap` otherwise. For a caller that only
+    /// asks "is the edge within `cap`" (a fray band, an edge falloff) this
+    /// stays cheap deep inside a big region, where the full search would walk
+    /// every empty cell out to the far shore — for every point it is asked.
+    pub fn dist_to_boundary_within(&self, p: Pt, cap: f64) -> f64 {
+        self.cutter().distance_within(p, cap)
+    }
+
     /// Boundary route from `a` to `b` walking along the region contours,
     /// whichever way is shorter. `None` when either point is not near a
     /// contour. This is the connector that makes a serpentine survive on
@@ -672,6 +681,13 @@ impl Cutter {
     /// Distance to the nearest edge, searching outward ring by ring of cells
     /// and stopping once no farther cell could hold anything closer.
     pub fn distance(&self, p: Pt) -> f64 {
+        self.distance_within(p, f64::MAX)
+    }
+
+    /// [`Self::distance`] up to `cap`: exact when the nearest edge is closer
+    /// than `cap`, `cap` otherwise. The search stops at the first ring of
+    /// cells that lies wholly beyond `cap`.
+    pub fn distance_within(&self, p: Pt, cap: f64) -> f64 {
         let mut best = f64::MAX;
         if self.cells.is_empty() {
             return best;
@@ -697,11 +713,11 @@ impl Cutter {
                     i += step as i64;
                 }
             }
-            if best <= r as f64 * self.cell {
+            if best <= r as f64 * self.cell || r as f64 * self.cell >= cap {
                 break;
             }
         }
-        best
+        best.min(cap)
     }
 
     /// Where `a`→`b` meets an edge, as fractions along it (unsorted,
@@ -1026,6 +1042,10 @@ mod tests {
         for _ in 0..2000 {
             let p = (rng.range(-50.0, 150.0), rng.range(-50.0, 150.0));
             assert_eq!(cutter.distance(p), brute(p), "{p:?}");
+            // Capped: exact below the cap, the cap above it.
+            for cap in [0.5, 3.0, 12.0] {
+                assert_eq!(cutter.distance_within(p, cap), brute(p).min(cap), "{p:?} within {cap}");
+            }
         }
     }
 }

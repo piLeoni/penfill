@@ -77,7 +77,7 @@ pub fn fill_stipple_edge(
     let noise = Perlin::new(seed);
     let f = falloff.max(1e-6);
     fill_stipple_field(region, dense, sparse, mark, seed, |p| {
-        let edge = (region.dist_to_boundary(p) / f).clamp(0.0, 1.0);
+        let edge = (region.dist_to_boundary_within(p, f) / f).clamp(0.0, 1.0);
         let n = noise.fbm(p.0 / f, p.1 / f, 2) * 0.5;
         edge + rough * n
     })
