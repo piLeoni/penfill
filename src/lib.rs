@@ -9,6 +9,7 @@
 
 pub mod anchor;
 pub mod chess;
+pub mod clouds;
 pub mod concentric;
 pub mod dither;
 pub mod doodle;

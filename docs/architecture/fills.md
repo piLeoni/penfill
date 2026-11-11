@@ -103,6 +103,7 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 | --- | --- | --- |
 | `isoline_blobs.rs` | `fill_isoline_blobs`, `fill_isoline_blobs_with_coverage`, `fill_isoline_blobs_params` | flat: contours of one 2D noise/metaball field; supports `EdgeMode`, `fray`, and `FillOutput` mask — see [isoline-blob-fills.md](isoline-blob-fills.md) |
 | `isoline_stack.rs` | `fill_isoline_stack`, `fill_isoline_stack_with_coverage`, `fill_isoline_stack_params` | 3D forest canopy: jagged foliage tiers, directional sunlight C-arcs, optional perpendicular slope ticks, analytical LUT occlusion, and closed `coverage` mask; `EdgeMode::{Clip, Inside, Overflow(mm)}`, `fray`, `CustomParams`, and `FillOutput` |
+| `clouds.rs` | `fill_clouds_with_coverage`, `CloudParams` | Cumulus seen from above: a domain-warped fbm sky thresholded to `coverage` is the body's height map; elongated, wobbly puffs ride on it as domes. Rims show only where no higher puff covers them, on the side away from the sun. The heap's shade (slope turned from the sun, plus cast shadow marched toward it) is stippled denser where deeper, or hatched (`dots: false`). Returns the union of puffs as `coverage`, to mask a map and to move down-sun as the clouds' shadow. Demo: `examples/clouds_demo.rs` |
 
 ## Texture (built on `field.rs` and flow/Voronoi)
 
