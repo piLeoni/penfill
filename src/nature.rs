@@ -8,7 +8,7 @@ use crate::concentric::signed_area;
 use crate::geo::{polyline_length, Pt, Region, Strokes};
 use crate::noise::Perlin;
 use crate::pattern::{fill_pattern_output, Canvas, EdgeMode, FillOutput, FillParams, Tools};
-use crate::random::poisson_disk;
+use crate::random::{poisson_disk, Rng};
 
 fn uf_find(parent: &mut [usize], i: usize) -> usize {
     let mut i = i;
@@ -274,9 +274,17 @@ pub(crate) fn draw_canopy(canvas: &Canvas, tools: &Tools) -> Strokes {
     let spacing = canvas.spacing;
     let mut rng = tools.rng_salted(23);
     let field = canvas.region.outset(spacing);
+    let sites = poisson_disk(&field, spacing * 1.05, canvas.seed).into_iter().map(|p| (p, Rng::new(rng.next_u64()))).collect();
+    canopy_at(canvas, tools, spacing, sites)
+}
+
+/// Canopies of trees about `size` mm across, one at each site with its own
+/// randomness (sites outside the region are skipped).
+pub(crate) fn canopy_at(canvas: &Canvas, tools: &Tools, size: f64, sites: Vec<(Pt, Rng)>) -> Strokes {
+    let spacing = size;
     let mut out: Strokes = Vec::new();
     let dot_r = spacing * 0.04;
-    for anchor in poisson_disk(&field, spacing * 1.05, canvas.seed) {
+    for (anchor, mut rng) in sites {
         if !canvas.region.covers_point(anchor) {
             continue;
         }
@@ -449,13 +457,21 @@ pub fn fill_twigs_params(region: &Region, params: &FillParams) -> FillOutput {
 }
 
 pub(crate) fn draw_twigs(canvas: &Canvas, tools: &Tools) -> Strokes {
-    tools.claim_fray();
     let spacing = canvas.spacing;
     let field = canvas.region.outset(spacing * 0.6);
     let mut rng = tools.rng_salted(73);
+    let sites = poisson_disk(&field, spacing * 1.18, canvas.seed).into_iter().map(|p| (p, Rng::new(rng.next_u64()))).collect();
+    twigs_at(canvas, tools, spacing, sites)
+}
+
+/// A twig of about `size` mm at each site, with the site's own randomness
+/// (sites outside the region are skipped). Frays twig by twig.
+pub(crate) fn twigs_at(canvas: &Canvas, tools: &Tools, size: f64, sites: Vec<(Pt, Rng)>) -> Strokes {
+    tools.claim_fray();
+    let spacing = size;
     let mut raw: Strokes = Vec::new();
 
-    for c in poisson_disk(&field, spacing * 1.18, canvas.seed) {
+    for (c, mut rng) in sites {
         if !canvas.region.covers_point(c) {
             continue;
         }

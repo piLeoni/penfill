@@ -34,30 +34,55 @@ struct Crown {
 
 pub(crate) fn draw_doodle_trees(canvas: &Canvas, tools: &Tools) -> Strokes {
     let diameter = canvas.spacing;
-    let coverage = canvas.custom.get_or("coverage", 0.85).clamp(0.0, 1.0);
-    let loops = canvas.custom.get_or("loops", 1.0).max(0.2);
-    let shadow = canvas.custom.get_or("shadow", 0.8).clamp(0.0, 1.0);
-    let light = canvas.custom.get_or("light_angle", 225.0).to_radians();
+    let look = Doodle {
+        diameter,
+        coverage: canvas.custom.get_or("coverage", 0.85).clamp(0.0, 1.0),
+        loops: canvas.custom.get_or("loops", 1.0).max(0.2),
+        shadow: canvas.custom.get_or("shadow", 0.8).clamp(0.0, 1.0),
+        light_deg: canvas.custom.get_or("light_angle", 225.0),
+    };
     let mut rng = tools.rng_salted(71);
-
     // Sites a little closer than a crown, so neighbours overlap.
     let field = tools.placement_field(diameter * 0.5);
-    let mut crowns: Vec<Crown> = Vec::new();
-    for c in poisson_disk(&field, diameter * 0.72, canvas.seed) {
-        let r = 0.5 * diameter * rng.range(0.7, 1.2);
-        if rng.unit() > coverage || !tools.element_fits(c, r * 0.9) {
+    let sites = poisson_disk(&field, diameter * 0.72, canvas.seed).into_iter().map(|c| (c, Rng::new(rng.next_u64()))).collect();
+    doodle_at(tools, &look, sites)
+}
+
+/// How doodled trees look.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Doodle {
+    /// Typical crown diameter, mm.
+    pub diameter: f64,
+    /// 0 – 1: share of the sites that get a tree.
+    pub coverage: f64,
+    /// Curls round the rim, as a multiple of the usual count.
+    pub loops: f64,
+    /// 0 – 1: share of crowns with a shade crescent.
+    pub shadow: f64,
+    /// Where the light comes from, page degrees.
+    pub light_deg: f64,
+}
+
+/// A doodled crown at each site that fits, each drawn with the site's own
+/// randomness; crowns nearer the bottom of the sheet hide those behind.
+pub(crate) fn doodle_at(tools: &Tools, look: &Doodle, sites: Vec<(Pt, Rng)>) -> Strokes {
+    let light = look.light_deg.to_radians();
+    let mut crowns: Vec<(Crown, Rng)> = Vec::new();
+    for (c, mut rng) in sites {
+        let r = 0.5 * look.diameter * rng.range(0.7, 1.2);
+        if rng.unit() > look.coverage || !tools.element_fits(c, r * 0.9) {
             continue;
         }
-        crowns.push(Crown { c, r });
+        crowns.push((Crown { c, r }, rng));
     }
     // Front (bottom of the sheet) first: each crown hides those behind it.
-    crowns.sort_by(|a, b| b.c.1.total_cmp(&a.c.1));
+    crowns.sort_by(|a, b| b.0.c.1.total_cmp(&a.0.c.1));
+    let (crowns, rngs): (Vec<Crown>, Vec<Rng>) = crowns.into_iter().unzip();
 
     let mut out: Strokes = Vec::new();
-    for (i, crown) in crowns.iter().enumerate() {
-        let mut rng = Rng::new(canvas.seed ^ (i as u64 + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93));
-        let mut strokes = vec![curl_ring(crown, loops, &mut rng)];
-        if rng.unit() < shadow {
+    for (i, (crown, mut rng)) in crowns.iter().zip(rngs).enumerate() {
+        let mut strokes = vec![curl_ring(crown, look.loops, &mut rng)];
+        if rng.unit() < look.shadow {
             strokes.push(shade_crescent(crown, light, &mut rng));
         }
         let front = &crowns[..i];
