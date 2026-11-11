@@ -92,6 +92,14 @@ impl CustomParams {
     pub fn get_or(&self, key: &str, default: f64) -> f64 {
         self.get(key).unwrap_or(default)
     }
+
+    /// Every parameter set, in the order it was set.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.entries[..self.len].iter().map(|(k, v)| {
+            let n = k.iter().position(|&b| b == 0).unwrap_or(k.len());
+            (std::str::from_utf8(&k[..n]).unwrap_or(""), *v)
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -961,267 +969,28 @@ fn run_pattern(
 }
 
 // ---------------------------------------------------------------------------
-// Unified Pattern Registry
+// The pattern registry: the catalogue, by name
 // ---------------------------------------------------------------------------
 
-/// Core built-in pattern names (excluding `litho::BUILTIN` and `pat:<NAME>`,
-/// which [`fill_by_name`] and [`all_fill_names`] also support).
-pub const FILL_NAMES: &[&str] = &[
-    "zigzag",
-    "rectilinear",
-    "lines",
-    "grid",
-    "triangles",
-    "concentric",
-    "offsets",
-    "spiral",
-    "hilbert",
-    "honeycomb",
-    "dots",
-    "dots_hex",
-    "waves",
-    "curl_waves",
-    "flow_waves",
-    "scallop_waves",
-    "wave_grid",
-    "scales",
-    "sunburst",
-    "stipple",
-    "stipple_noise",
-    "stipple_edge",
-    "gravel",
-    "gravel_clipped",
-    "grass",
-    "scribble",
-    "truchet",
-    "marble",
-    "wood",
-    "cracks",
-    "cell_net",
-    "eddies",
-    "swells",
-    "ripples",
-    "terrazzo",
-    "chess",
-    "pebbles",
-    "leaves",
-    "sprouts",
-    "fluid_grass",
-    "lily_pads",
-    "canopy",
-    "doodle_trees",
-    "tufts",
-    "twigs",
-    "vines",
-    "growth",
-    "isoline_blobs",
-    "isoline_stack",
-    "solid",
-];
-
-/// Every fill name supported by [`fill_by_name`] and [`fill_output_by_name`],
-/// including [`FILL_NAMES`], [`crate::litho::BUILTIN`], and `pat:<NAME>`.
+/// Every pattern a fill can be asked for by name: the catalogue's materials
+/// and generators (see [`crate::catalog`]).
 pub fn all_fill_names() -> Vec<String> {
-    let mut out: Vec<String> = FILL_NAMES.iter().map(|s| (*s).to_string()).collect();
-    for name in crate::litho::BUILTIN {
-        out.push((*name).to_string());
-    }
-    for name in crate::pat::BUILTIN {
-        out.push(format!("pat:{name}"));
-    }
-    out
+    crate::catalog::names().into_iter().map(String::from).collect()
 }
 
-/// Dispatch any built-in pattern by name with unified [`FillParams`] (`spacing`,
-/// `angle`, `seed`, `anchor`, `inset`, `edge`, `fray`).
+/// Pattern `name` (a material or a generator from [`crate::catalog`]) in
+/// `region`, with the standard parameters and any custom ones the pattern
+/// takes (others are ignored). `None` when the name is unknown or a custom
+/// value is out of range; [`crate::catalog::fill`] says why.
 pub fn fill_by_name(name: &str, region: &Region, params: &FillParams) -> Option<Strokes> {
-    fill_named(name, region, params, false).map(|o| o.strokes)
+    let spec = crate::catalog::Spec::from_params(name, params);
+    crate::catalog::fill(name, region, &spec).ok().map(|o| o.strokes)
 }
 
-/// Dispatch any built-in pattern by name with unified [`FillParams`] and return
-/// both [`FillOutput::strokes`] and the polygon [`FillOutput::mask`].
+/// Like [`fill_by_name`], also returning the mask: the area the pattern covers.
 pub fn fill_output_by_name(name: &str, region: &Region, params: &FillParams) -> Option<FillOutput> {
-    fill_named(name, region, params, true)
-}
-
-fn fill_named(
-    name: &str,
-    region: &Region,
-    params: &FillParams,
-    collect_mask: bool,
-) -> Option<FillOutput> {
-    // Check that `name` is known before running `run_pattern`.
-    let is_pat = name
-        .strip_prefix("pat:")
-        .is_some_and(|n| crate::pat::builtin(n).is_some());
-    let is_litho = crate::litho::BUILTIN.contains(&name);
-    let is_core = FILL_NAMES.contains(&name);
-    if !is_core && !is_litho && !is_pat {
-        return None;
-    }
-
-    if name == "solid" {
-        let target = params.resolve_region(region, 0.0);
-        let limit = params.resolve_limit(&target);
-        return Some(FillOutput {
-            strokes: crate::solid::fill_solid(&limit),
-            mask: if collect_mask { limit } else { Region::default() },
-        });
-    }
-
-    // Sub-params passed to inner `_params` functions have `inset: None` and
-    // `fray: 0.0` because the outer `run_pattern` applies `inset`, `limit`,
-    // and `fray` once on the final result.
-    let inner = FillParams {
-        inset: None,
-        fray: 0.0,
-        ..*params
-    };
-
-    Some(run_pattern(region, params, collect_mask, |c, t| {
-        let s = c.spacing;
-        let a = c.angle;
-        let seed = c.seed;
-        let anchor = c.anchor;
-        match name {
-            "zigzag" => crate::zigzag::fill_zigzag_inset(&c.limit, s, a, None, anchor),
-            "rectilinear" => crate::rectilinear::fill_rectilinear(&c.limit, s, a, None, anchor),
-            "lines" => crate::grid::fill_lines(&c.limit, s, a, anchor),
-            "grid" => crate::grid::fill_grid(&c.limit, s, a, anchor),
-            "triangles" => crate::grid::fill_triangles(&c.limit, s, a, anchor),
-            "concentric" => crate::concentric::fill_concentric(&c.limit, s, None),
-            "offsets" => crate::concentric::fill_offsets(&c.limit, s, None),
-            "spiral" => crate::spiral::fill_spiral(&c.limit, s),
-            "hilbert" => crate::hilbert::fill_hilbert(&c.limit, s, None),
-            "honeycomb" => crate::honeycomb::fill_honeycomb(&c.limit, s, a, 0.0, anchor),
-            "dots" => {
-                t.set_mask_halo((s * 0.35).max(0.25));
-                crate::dotswaves::fill_dots_with_lattice(
-                    &c.limit,
-                    s,
-                    a,
-                    s * 0.2,
-                    crate::dotswaves::Lattice::Square,
-                    anchor,
-                )
-            }
-            "dots_hex" => {
-                t.set_mask_halo((s * 0.35).max(0.25));
-                crate::dotswaves::fill_dots_with_lattice(
-                    &c.limit,
-                    s,
-                    a,
-                    s * 0.2,
-                    crate::dotswaves::Lattice::Hexagonal,
-                    anchor,
-                )
-            }
-            "waves" => crate::dotswaves::fill_waves_params(c.region, &inner).strokes,
-            "curl_waves" => crate::waves_curl::draw_curl_waves(c, t),
-            "flow_waves" => crate::waves_flow::draw_flow_waves(c, t),
-            "scallop_waves" => crate::waves_scallop::draw_scallop_waves(c, t),
-            "wave_grid" => crate::dotswaves::fill_wave_grid_params(c.region, &inner).strokes,
-            "scales" => crate::scales::fill_scales(&c.limit, s, a, anchor),
-            "sunburst" => crate::radial::fill_sunburst(&c.limit, s, a, anchor),
-            "stipple" => {
-                t.set_mask_halo((s * 0.45).max(0.25));
-                crate::stipple::fill_stipple(&c.limit, s, s * 0.3, seed)
-            }
-            "stipple_noise" => {
-                t.set_mask_halo((s * 0.55).max(0.25));
-                crate::stipple::fill_stipple_noise(&c.limit, s, s * 2.5, s * 0.4, 12.0, seed)
-            }
-            "stipple_edge" => {
-                t.set_mask_halo((s * 0.55).max(0.25));
-                crate::stipple::fill_stipple_edge(&c.limit, s, s * 4.0, s * 0.4, 8.0, 0.5, seed)
-            }
-            "gravel" => {
-                let g_params = match inner.edge {
-                    EdgeMode::Clip => inner.edge(EdgeMode::Inside),
-                    _ => inner,
-                };
-                crate::gravel::fill_gravel_params(c.region, &g_params).strokes
-            }
-            "gravel_clipped" => {
-                crate::gravel::fill_gravel_params(c.region, &inner.edge(EdgeMode::Clip)).strokes
-            }
-            "grass" => crate::grass::fill_grass(&c.limit, s, a, seed, anchor),
-            "scribble" => crate::scribble::fill_scribble(&c.limit, s, a, seed),
-            "truchet" => crate::truchet::fill_truchet(&c.limit, s.max(0.5), a, seed, anchor),
-            "marble" => crate::textures::draw_marble(c, t),
-            "wood" => crate::textures::draw_wood(c, t),
-            "cracks" => crate::textures::fill_cracks_params(
-                c.region,
-                &FillParams {
-                    spacing: s * 4.0,
-                    ..inner
-                },
-            )
-            .strokes,
-            "cell_net" => crate::textures::draw_cell_net(c, t),
-            "eddies" => crate::textures::fill_eddies_params(c.region, &inner).strokes,
-            "swells" => crate::textures::fill_swells_params(c.region, &inner).strokes,
-            "ripples" => crate::textures::fill_ripples_params(c.region, &inner).strokes,
-            "terrazzo" => crate::terrazzo::draw_terrazzo(c, t, s / 6.0),
-            "chess" => crate::chess::fill_chess(&c.limit, s, s / 8.0, a, anchor),
-            "pebbles" => crate::nature::draw_pebbles(c, t),
-            "leaves" => crate::nature::draw_sprouts(c, t),
-            "sprouts" => crate::nature::draw_sprouts(c, t),
-            "fluid_grass" => crate::nature::draw_fluid_grass(c, t),
-            "lily_pads" => crate::nature::draw_lily_pads(c, t),
-            "canopy" => crate::nature::draw_canopy(c, t),
-            "doodle_trees" => crate::doodle::draw_doodle_trees(c, t),
-            "tufts" => crate::nature::draw_tufts(c, t),
-            "twigs" => crate::nature::draw_twigs(c, t),
-            "vines" => crate::nature::draw_vines(c, t),
-            "growth" => crate::growth::fill_growth_params(c.region, &inner).strokes,
-            "isoline_blobs" => {
-                let feature_size = inner.custom.get_or("feature_size", (s * 4.0).max(2.0));
-                let mut p = crate::isoline_blobs::default_params(feature_size, s.max(0.25), seed);
-                if let Some(w) = inner
-                    .custom
-                    .get("warp")
-                    .or_else(|| inner.custom.get("jitter"))
-                    .or_else(|| inner.custom.get("jitter_intensity"))
-                    .or_else(|| inner.custom.get("intensity"))
-                {
-                    p.warp = w.max(0.0);
-                }
-                if let Some(wp) = inner
-                    .custom
-                    .get("warp_period")
-                    .or_else(|| inner.custom.get("jitter_period"))
-                    .or_else(|| inner.custom.get("period"))
-                {
-                    p.warp_period = wp.clamp(0.20, 4.0);
-                }
-                if let Some(th) = inner.custom.get("threshold") {
-                    p.threshold = th;
-                }
-                p.edge = c.edge;
-                p.fray = 0.0;
-                let out = crate::isoline_blobs::fill_isoline_blobs_with_coverage(c.region, &p);
-                t.add_mask(&out.coverage);
-                out.strokes
-            }
-            "isoline_stack" => {
-                let crown = (s * 4.2).max(3.6);
-                let p = crate::isoline_stack::IsolineStackParams::from_fill_params(&inner, crown);
-                let out = crate::isoline_stack::fill_isoline_stack_with_coverage(c.region, &p);
-                t.add_mask(&out.coverage);
-                out.strokes
-            }
-            other if other.starts_with("pat:") => {
-                let pat_name = other.strip_prefix("pat:").unwrap_or("");
-                if let Some(pattern) = crate::pat::builtin(pat_name) {
-                    crate::pat::fill_pat(&c.limit, &pattern, s, a, anchor)
-                } else {
-                    vec![]
-                }
-            }
-            other => crate::litho::fill_by_name(other, &c.limit, s, a, seed).unwrap_or_default(),
-        }
-    }))
+    let spec = crate::catalog::Spec::from_params(name, params);
+    crate::catalog::fill_output(name, region, &spec).ok()
 }
 
 #[cfg(test)]
@@ -1324,7 +1093,7 @@ mod tests {
     #[test]
     fn registry_dispatches_and_frays_across_families() {
         let region = Region::from_ring(&[(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)]);
-        for name in ["lines", "dots", "pebbles", "canopy", "gravel", "granite", "pat:ANSI31"] {
+        for name in ["lines", "dots", "pebbles", "canopy", "gravel", "granite", "brick", "marsh"] {
             let clean = fill_by_name(name, &region, &FillParams::new(3.0).seed(7)).unwrap();
             let frayed = fill_output_by_name(
                 name,

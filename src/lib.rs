@@ -18,7 +18,6 @@ pub mod dotswaves;
 pub mod field;
 pub mod fray;
 pub mod geo;
-pub mod grass;
 pub mod growth;
 pub mod hand;
 pub mod hilbert;
@@ -27,7 +26,6 @@ pub mod isoline_stack;
 pub mod gravel;
 pub mod grid;
 pub mod honeycomb;
-pub mod litho;
 pub mod nature;
 pub mod noise;
 pub mod pat;
@@ -61,7 +59,7 @@ pub use isoline_blobs::{
 };
 pub use pattern::{
     all_fill_names, fill_by_name, fill_output_by_name, fill_pattern, fill_pattern_output,
-    fill_pattern_with, Canvas, CustomParams, EdgeMode, FillOutput, FillParams, Tools, FILL_NAMES,
+    fill_pattern_with, Canvas, CustomParams, EdgeMode, FillOutput, FillParams, Tools,
 };
 pub use solid::fill_solid;
 pub use stream::{Clipped, Frayed, Meter, Sink};

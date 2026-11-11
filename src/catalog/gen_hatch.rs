@@ -10,7 +10,7 @@
 //! length, a threshold — is a function of `j` and the dash's place along
 //! `u`, never of the region: two areas side by side share one hatch.
 
-use super::schema::{Args, Default, Kind, Opt, CONTRAST, DENSITY, FEATURE, TOWARD, VARY};
+use super::schema::{Args, Default, Kind, Opt, CONTRAST, DENSITY, FEATURE, TOWARD};
 use super::tone::{rank, Tone};
 use super::Generator;
 use crate::anchor::{indices, Frame};
@@ -54,6 +54,13 @@ const WOBBLE_LENGTH: Opt = Opt {
     kind: Kind::Length,
     default: Default::Rel(14.0),
     doc: "The length of one bend along the lines, in mm.",
+};
+
+const VARY: Opt = Opt {
+    key: "vary",
+    kind: Kind::Number { min: 0.0, max: 1.0 },
+    default: Default::Num(0.0),
+    doc: "How uneven the gaps between lines are, 0 (even) to 1: layered soil, worn bedding.",
 };
 
 pub static HATCH: Generator = Generator {

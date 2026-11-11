@@ -101,7 +101,38 @@ pub fn material(name: &str) -> Option<&'static Material> {
 
 /// Every name a fill can be asked for: materials first, then generators.
 pub fn names() -> Vec<&'static str> {
-    MATERIALS.iter().map(|m| m.name).chain(GENERATORS.iter().map(|g| g.name)).collect()
+    let mut out: Vec<&'static str> = MATERIALS.iter().map(|m| m.name).collect();
+    out.extend(GENERATORS.iter().map(|g| g.name).filter(|g| material(g).is_none()));
+    out
+}
+
+/// The generator and spacing of each layer `name` draws with `spec`: what a
+/// host needs to estimate a fill's cost before running it.
+pub fn layers(name: &str, spec: &Spec) -> Result<Vec<(&'static str, f64)>, CatalogError> {
+    Ok(plan(name, spec)?.iter().map(|l| (l.generator.name, l.spacing)).collect())
+}
+
+/// Whether `name` knows its own footprint (tree crowns, clouds, stones,
+/// scattered marks): its mask is what it covers, not the whole area.
+pub fn own_mask(name: &str) -> bool {
+    match (generator(name), material(name)) {
+        (Some(g), _) => g.own_mask,
+        (None, Some(m)) => m.layers.iter().any(|l| generator(l.generator).is_some_and(|g| g.own_mask)),
+        _ => false,
+    }
+}
+
+/// The generators a material draws with (an alias, its own), in layer order.
+pub fn generators_of(name: &str) -> Vec<&'static Generator> {
+    match material(name) {
+        Some(m) if !m.is_alias() => m.layers.iter().filter_map(|l| generator(l.generator)).collect(),
+        _ => generator(name).into_iter().collect(),
+    }
+}
+
+/// The spacing `name` draws at when none is given, in mm.
+pub fn default_spacing(name: &str) -> Option<f64> {
+    generator(name).map(|g| g.spacing).or_else(|| material(name).map(|m| m.spacing))
 }
 
 /// What a host asks for, beyond the pattern's name. Unset standard fields
@@ -150,6 +181,26 @@ impl Spec {
     pub fn option(mut self, key: &str, value: impl Into<Value>) -> Spec {
         self.options.set(key, value);
         self
+    }
+
+    /// The spec the older `FillParams` interface describes for `name`: its
+    /// standard fields, and the custom numbers `name`'s generators take
+    /// (others dropped, as that interface always ignored them).
+    pub fn from_params(name: &str, p: &FillParams) -> Spec {
+        let takes = |key: &str| -> bool {
+            match (generator(name), material(name)) {
+                (Some(g), _) => g.options.iter().any(|o| o.key == key),
+                (None, Some(m)) => m.layers.iter().filter_map(|l| generator(l.generator)).any(|g| g.options.iter().any(|o| o.key == key)),
+                _ => false,
+            }
+        };
+        let mut options = Options::new();
+        for (k, v) in p.custom.iter() {
+            if takes(k) {
+                options.set(k, v);
+            }
+        }
+        Spec { spacing: Some(p.spacing), angle: Some(p.angle), seed: p.seed, anchor: p.anchor, inset: p.inset, edge: Some(p.edge), fray: p.fray, options }
     }
 }
 
@@ -209,6 +260,7 @@ struct Planned<'a> {
     angle: f64,
     salt: u64,
     edge: Option<EdgeMode>,
+    inset: Option<f64>,
     values: Vec<(&'a str, Value)>,
 }
 
@@ -226,7 +278,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
             return Err(CatalogError::BadSpacing { pattern: name.to_string(), got: s });
         }
     }
-    if let Some(g) = generator(name) {
+    if let Some(g) = generator(name).filter(|_| material(name).is_none_or(|m| m.is_alias())) {
         let values = spec.options.iter().map(|(k, v)| (k, v.clone())).collect();
         return Ok(vec![Planned {
             generator: g,
@@ -234,6 +286,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
             angle: spec.angle.unwrap_or(g.angle),
             salt: 0,
             edge: spec.edge,
+            inset: spec.inset,
             values,
         }]);
     }
@@ -263,6 +316,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
         let mut spacing = base;
         let mut angle = spec.angle.unwrap_or(0.0);
         let mut edge = None;
+        let mut inset = None;
         let mut values: Vec<(&str, Value)> = Vec::new();
         for (key, v) in layer.set {
             match (*key, v) {
@@ -271,6 +325,8 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
                 ("edge", materials::M::Text("inside")) => edge = Some(EdgeMode::Inside),
                 ("edge", materials::M::Text("clip")) => edge = Some(EdgeMode::Clip),
                 ("edge", materials::M::Rel(k)) => edge = Some(EdgeMode::Overflow(base * k)),
+                // A fixed margin in mm (a hair of clearance), not scaled.
+                ("inset", materials::M::Num(mm)) => inset = Some(*mm),
                 _ => values.push((key, v.resolve(base))),
             }
         }
@@ -280,7 +336,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
                 values.push((key, v.clone()));
             }
         }
-        out.push(Planned { generator: g, spacing, angle, salt: i as u64, edge: spec.edge.or(edge), values });
+        out.push(Planned { generator: g, spacing, angle, salt: i as u64, edge: spec.edge.or(edge), inset: spec.inset.or(inset), values });
     }
     Ok(out)
 }
@@ -294,7 +350,7 @@ fn run(name: &str, region: &Region, spec: &Spec, mask: bool) -> Result<FillOutpu
             .angle(l.angle)
             .seed(spec.seed.wrapping_add(l.salt.wrapping_mul(0x9E37_79B9)))
             .anchor(spec.anchor)
-            .inset_opt(spec.inset)
+            .inset_opt(l.inset)
             .fray(spec.fray);
         if let Some(e) = l.edge {
             params = params.edge(e);
@@ -373,12 +429,14 @@ pub fn describe() -> String {
             })
             .collect::<Vec<_>>()
             .join(", ");
+        let spacing = if m.is_alias() { generator(m.name).map_or(m.spacing, |g| g.spacing) } else { m.spacing };
         s += &format!(
-            "    {{ \"name\": {}, \"group\": {}, \"about\": {}, \"spacing\": {}, \"layers\": [{layers}] }}{}\n",
+            "    {{ \"name\": {}, \"group\": {}, \"about\": {}, \"spacing\": {}, \"alias\": {}, \"layers\": [{layers}] }}{}\n",
             json(m.name),
             json(m.group.id()),
             json(m.about),
-            num(m.spacing),
+            num(spacing),
+            m.is_alias(),
             if mi + 1 < MATERIALS.len() { "," } else { "" }
         );
     }
@@ -436,5 +494,126 @@ fn default_json(d: &schema::Default) -> String {
         D::Flag(b) => b.to_string(),
         D::Text(t) => json(t),
         D::Rels(a, b) => format!("{{ \"timesSpacing\": [{}, {}] }}", num(*a), num(*b)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square(s: f64) -> Region {
+        Region::from_ring(&[(0.0, 0.0), (s, 0.0), (s, s), (0.0, s)])
+    }
+
+    #[test]
+    fn materials_are_built_from_real_generators_and_options() {
+        for m in MATERIALS {
+            if m.is_alias() {
+                assert!(generator(m.name).is_some(), "alias {} names no generator", m.name);
+                continue;
+            }
+            assert!(m.spacing > 0.0, "{}", m.name);
+            for l in m.layers {
+                let g = generator(l.generator).unwrap_or_else(|| panic!("{}: no generator {}", m.name, l.generator));
+                for (key, _) in l.set {
+                    let standard = matches!(*key, "spacing" | "angle" | "edge" | "inset");
+                    assert!(standard || g.options.iter().any(|o| o.key == *key), "{}: {} takes no {key}", m.name, g.name);
+                }
+            }
+            assert!(generator(m.name).is_none(), "{} shares a generator's name but changes it", m.name);
+        }
+        let mut names = names();
+        let n = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), n, "a name is listed twice");
+    }
+
+    #[test]
+    fn options_are_declared_once_and_resolve() {
+        for g in generators() {
+            let mut keys: Vec<&str> = g.options.iter().map(|o| o.key).collect();
+            keys.sort();
+            let n = keys.len();
+            keys.dedup();
+            assert_eq!(keys.len(), n, "{}: an option is declared twice", g.name);
+            Args::resolve(g.name, g.options, g.spacing, &[]).unwrap_or_else(|e| panic!("{}: {e}", g.name));
+        }
+    }
+
+    #[test]
+    fn every_pattern_draws_in_a_small_square() {
+        let sq = square(20.0);
+        for name in names() {
+            if name == "solid" {
+                continue;
+            }
+            let out = fill(name, &sq, &Spec::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!out.strokes.is_empty(), "{name} draws nothing in a 20 mm square");
+            for s in &out.strokes {
+                for &(x, y) in s {
+                    assert!((-0.01..=20.01).contains(&x) && (-0.01..=20.01).contains(&y), "{name}: ({x}, {y}) outside");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_seed_draws_the_same_lines() {
+        let sq = square(20.0);
+        for name in names() {
+            let a = fill(name, &sq, &Spec::default().seed(5)).unwrap();
+            let b = fill(name, &sq, &Spec::default().seed(5)).unwrap();
+            assert_eq!(a.strokes, b.strokes, "{name}");
+        }
+    }
+
+    #[test]
+    fn mistakes_say_what_to_write() {
+        let e = validate("hatch", &Spec::default().option("crosss", 2.0)).unwrap_err().to_string();
+        assert!(e.contains("crosss") && e.contains("cross"), "{e}");
+        let e = validate("hatch", &Spec::default().option("cross", 7.0)).unwrap_err().to_string();
+        assert!(e.contains("1 to 3"), "{e}");
+        let e = validate("hatch", &Spec::default().option("join", "yes")).unwrap_err().to_string();
+        assert!(e.contains("true or false"), "{e}");
+        let e = validate("hatcj", &Spec::default()).unwrap_err().to_string();
+        assert!(e.contains("did you mean \"hatch\""), "{e}");
+        let e = validate("lines", &Spec::default().spacing(0.0)).unwrap_err().to_string();
+        assert!(e.contains("more than 0"), "{e}");
+    }
+
+    #[test]
+    fn a_material_scales_as_a_whole() {
+        let sq = square(30.0);
+        let ink = |spec: &Spec| -> f64 { fill("dashes", &sq, spec).unwrap().strokes.iter().map(|s| crate::geo::polyline_length(s)).sum() };
+        let m = material("dashes").unwrap();
+        // Twice the spacing: half the rows, dashes twice as long, so about half the ink.
+        let (a, b) = (ink(&Spec::default()), ink(&Spec::default().spacing(m.spacing * 2.0)));
+        assert!((b / a - 0.5).abs() < 0.1, "{a} → {b}");
+    }
+
+    #[test]
+    fn hatch_is_seamless_with_a_global_anchor() {
+        let rect = |x0: f64, x1: f64| Region::from_ring(&[(x0, 0.0), (x1, 0.0), (x1, 20.0), (x0, 20.0)]);
+        for opts in [
+            Spec::default(),
+            Spec::default().option("dash", Value::Nums(vec![1.0, 0.5])).option("dash_jitter", 0.6),
+            Spec::default().option("wobble", 0.6).option("vary", 0.8),
+            Spec::default().option("cross", 3.0),
+        ] {
+            let spec = opts.anchor(Anchor::GLOBAL).spacing(0.7);
+            let ink = |r: &Region| -> f64 { fill("hatch", r, &spec).unwrap().strokes.iter().map(|s| crate::geo::polyline_length(s)).sum() };
+            let (whole, halves) = (ink(&rect(0.0, 40.0)), ink(&rect(0.0, 17.3)) + ink(&rect(17.3, 40.0)));
+            assert!((whole - halves).abs() < 0.02 * whole, "{spec:?}: {whole} vs {halves}");
+        }
+    }
+
+    #[test]
+    fn the_description_names_everything() {
+        let d = describe();
+        for name in names() {
+            assert!(d.contains(&format!("\"{name}\"")), "{name} missing from describe()");
+        }
+        assert!(d.trim_end().ends_with('}'));
     }
 }
