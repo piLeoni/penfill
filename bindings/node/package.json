@@ -1,6 +1,6 @@
 {
   "name": "penfill",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fills and hatches for pen plotters: zigzag, spiral, lattices, stipple, gravel, marble, CAD .pat patterns, your own functions and SVG tiles.",
   "keywords": ["plotter", "pen plotter", "hatch", "infill", "zigzag", "axidraw", "svg", "generative art"],
   "license": "MIT OR Apache-2.0",
