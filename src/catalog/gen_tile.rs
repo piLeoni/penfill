@@ -45,8 +45,8 @@ const SIZE: Opt = Opt {
     default: Default::None,
     doc: "One piece, `[length, width]` in mm. Unset, at spacing s: brick [3s, s], herringbone and basket [2s, s], parquet [4s, 0.8s] (a block of five boards), setts [1.15s, s], flagstones [3s, 2s], tiles and chess [3s, 3s], hexagons 2.5s across, stairs [6s, 1.5s] (slab length, tread depth), grate [3s, 0.5s] (cross bar pitch, bar pitch). For your own polylines: the tile box, centred on the origin (unset: the lines' extent).",
 };
-const SHIFT: Opt = Opt {
-    key: "shift",
+const STAGGER: Opt = Opt {
+    key: "stagger",
     kind: Kind::Number { min: 0.0, max: 1.0 },
     default: Default::Num(0.0),
     doc: "For your own motif: how far each row is shifted along, as a share of the tile width (0.5: brick bond).",
@@ -68,7 +68,7 @@ pub static TILE: Generator = Generator {
     about: "A motif laid on a lattice: brick, herringbone, basket weave, parquet, setts, flagstones, tiles, hexagons, stairs, grating, chess; your own polylines; or a CAD .pat hatch.",
     spacing: 2.0,
     angle: 0.0,
-    options: &[&MOTIF, &SIZE, &SHIFT, &GAP, &JITTER, &PAT],
+    options: &[&MOTIF, &SIZE, &STAGGER, &GAP, &JITTER, &PAT],
     own_mask: false,
     inset: 0.0,
     draw,
@@ -84,7 +84,7 @@ fn draw(c: &Canvas, t: &Tools, a: &Args) -> Strokes {
         return cad(c, pat);
     }
     match a.motif("motif") {
-        Some(Motif::Lines(lines)) => custom(c, lines, a.pair("size"), a.num("shift")),
+        Some(Motif::Lines(lines)) => custom(c, lines, a.pair("size"), a.num("stagger")),
         Some(Motif::Named(name)) => named(c, t, name, a),
         None => Strokes::new(),
     }
@@ -637,7 +637,7 @@ mod tests {
     fn a_custom_motif_tiles() {
         let sq = rect(0.0, 0.0, 20.0, 20.0);
         let plus: Strokes = vec![vec![(-1.0, 0.0), (1.0, 0.0)], vec![(0.0, -1.0), (0.0, 1.0)]];
-        let s = tile(&sq, Spec::default().option("motif", plus).option("size", 4.0).option("shift", 0.5));
+        let s = tile(&sq, Spec::default().option("motif", plus).option("size", 4.0).option("stagger", 0.5));
         // 25 tiles, two strokes each, some cut at the wall.
         assert!(s.len() >= 40, "{}", s.len());
         for p in s.iter().flatten() {
