@@ -15,7 +15,7 @@ The pattern catalogue is two layers:
   generator and set every option.
 
 Sources: `src/catalog/` (`mod.rs` the entry points, `value.rs` options,
-`schema.rs` self-description, `field.rs` tone, `marks.rs` the symbol library,
+`schema.rs` self-description, `tone.rs` tone, `marks.rs` the symbol library,
 `gen_*.rs` the generators, `materials.rs` the table).
 
 ## Why
@@ -56,10 +56,20 @@ multiples of the material's spacing, resolved when the material is built.
 | `scatter` | One mark at each of many points | `arrange` (`blue`, `hex`, `square`, `rows`, `clusters`), `motif` (a symbol name or your own polylines), `rotate` (`random`, `aligned`, degrees), `vary`, `jitter` |
 | `cells` | A Voronoi tessellation | `style` (`stones`, `net`, `cracks`), `gap`, `round`, `vary`, `inner` (a mark inside each cell) |
 | `tile` | A motif repeated on a lattice | `motif` (a name such as `brick`, or your own polylines), `size` `[w, h]`, `shift` (row offset), `pat` (CAD `.pat` text) |
-| `waves` | Wavy parallel lines | `shape` (`sine`, `scallop`, `zigzag`, `curl`, `flow`), `wavelength`, `amplitude`, `cross` |
+| `waves` | Wavy parallel lines | `shape` (`sine`, `scallop`, `zigzag`, `curl`, `flow`), `wavelength` and `amplitude` in mm (unset: the shape's own proportions), `cross` (2: mirrored rows close into a net; curl and flow cross at 90°), `stagger`, `flip`; scallop `round`; curl `curl` (hook size), `turns`; flow `drift`, `breaks` |
 | `rings` | Rings from the boundary inward | `from` (`outline`: holes stop them; `edges`: every edge, holes included), `spiral` |
-| `scribble` | Hand hatching in loose overlapping strokes | `layers`, `loose` |
-| Specialists | `hilbert`, `truchet`, `sunburst`, `honeycomb`, `scales`, `wood`, `marble`, `swells`, `eddies`, `ripples`, `isoline-stack`, `isoline-blobs`, `clouds`, `growth`, `doodle-trees`, `canopy`, `twigs`, `solid` | Their own, as before |
+| `scribble` | Hand shading: bands of back-and-forth passes with rounded turns, overlapping, layered at ~50° | `layers` (1–3), `loose`, `length` (one pass), tone (`density`…: patches thin, upper layers drop) |
+| `sunburst` | Rays in generations, each starting on one circle where the gaps open | `centre` (default the shape's middle, any anchor) |
+| `honeycomb` | Hexagons a spacing across | `walls` (double walls this far apart) |
+| `wood` | Grain level lines, knots on their own anchored lattice | `knots` |
+| `doodle-trees` | Curly sketch-map crowns a spacing across | `coverage`, `loops`, `shadow`, `light_angle` |
+| `growth` | Space-colonisation branches, twigs a spacing apart | `roots`, `root_spacing`, `step`, `reach`, `kill`, `jitter`, `pen`, `trunk`, `coverage`, `variation`, `max_steps` |
+| `isoline-stack` | Contour-tier tree crowns; `spacing` is the crown diameter | `hatched`, `coverage`, `bubble`, `slices`, `jitter`, `jitter_period`, `ticks`, `elongation`, `lobes`, `light`, `light_angle`, `light_elevation`, `hatch` |
+| `isoline-blobs` | Nested-contour blobs a spacing apart | `contour`, `warp`, `warp_period`, `threshold` |
+| `clouds` | Cumulus from above; `spacing` is the puff size | `cell`, `coverage`, `warp`, `puffs`, `elongate`, `stretch`, `wind`, `light_angle`, `light_elevation`, `height`, `shade`, `hatch`, `shading`, `dot` |
+| Others | `hilbert`, `truchet`, `scales`, `marble`, `swells`, `eddies`, `ripples`, `canopy`, `twigs`, `solid` | The shared vocabulary only |
+
+Light comes from `light_angle` in page degrees (0 from the right, 90 from below) everywhere, defaulting to 225, the map maker's top left. The covering generators (`growth`, `isoline-*`, `clouds`, and `canopy`, `doodle-trees`) register what their marks cover as the mask (`ownMask`); `solid` draws nothing and masks the whole area. Scattered specialists (`canopy`, `twigs`, `doodle-trees`) place their marks at anchored sites (`points::sites`).
 
 ## Materials
 

@@ -42,23 +42,33 @@ pub(crate) fn draw_scallop_waves(c: &Canvas, _t: &Tools) -> Strokes {
     let per = 16;
 
     let mut out: Strokes = Vec::new();
+    // Scallops start at whole multiples of `w` from the anchor, so two
+    // regions on one global anchor share their cusps.
+    let first = (-reach / w).floor() as i64;
     for j in -rows..=rows {
         let y = j as f64 * s;
         let shift = if j.rem_euclid(2) == 1 { stagger * w } else { 0.0 };
         let mut line: Vec<Pt> = Vec::with_capacity((n as usize) * per + 1);
-        for i in 0..n {
-            let xa = -reach + i as f64 * w + shift;
+        for i in 0..=n {
+            let xa = (first + i) as f64 * w + shift;
             for k in 0..per {
                 let u = k as f64 / per as f64;
                 // y grows down the page, so the arc dips below the row line
                 // and meets the next one at a sharp point.
-                line.push((xa + u * w, y + depth * (PI * u).sin().powf(round)));
+                line.push((xa + u * w, y + scallop(u, depth, round)));
             }
         }
-        line.push((-reach + n as f64 * w + shift, y));
+        line.push(((first + n + 1) as f64 * w + shift, y));
         out.push(line.into_iter().map(to_page).collect());
     }
     out
+}
+
+/// The dip of a scallop `t` (0 – 1) of the way across it: 0 at both
+/// cusps, `depth` in the middle; `round` below 1 fills the arc out, above 1
+/// draws it to a point.
+pub(crate) fn scallop(t: f64, depth: f64, round: f64) -> f64 {
+    depth * (PI * t.clamp(0.0, 1.0)).sin().powf(round)
 }
 
 #[cfg(test)]

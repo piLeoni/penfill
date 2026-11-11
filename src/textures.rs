@@ -69,41 +69,61 @@ pub fn fill_wood_params(region: &Region, params: &FillParams) -> FillOutput {
 }
 
 pub(crate) fn draw_wood(canvas: &Canvas, tools: &Tools) -> Strokes {
+    wood(canvas, tools, canvas.custom.get_or("knots", 1.0))
+}
+
+/// Wood grain over the canvas: the level lines of `across + bend + knots`,
+/// every `spacing`, in the anchored frame. `knots` is how many knots there
+/// are, on average, per square of 30 spacings.
+///
+/// Both the grain and the knots belong to the frame, not to the region: the
+/// levels are whole multiples of the spacing across the frame, and knots
+/// sit on a lattice of their own with one seed per cell. So the grain is
+/// drawn wherever the region lies on the page (levels taken from the page
+/// origin used to stop short of a region far from it), and with a global
+/// anchor two boards side by side share it.
+pub(crate) fn wood(canvas: &Canvas, tools: &Tools, knots: f64) -> Strokes {
     let spacing = canvas.spacing;
-    let (minx, miny, maxx, maxy) = canvas.bounds;
-    let area = (maxx - minx) * (maxy - miny);
-    let mut rng = tools.rng_salted(9);
-    let n_knots = ((area / 900.0).round() as usize).max(1);
-    let knots: Vec<(Pt, f64)> = (0..n_knots)
-        .filter_map(|_| {
-            let r = spacing + rng.range(2.5, 5.0);
-            let inner = canvas.region.inset(r);
-            (0..50)
-                .map(|_| (rng.range(minx, maxx), rng.range(miny, maxy)))
-                .find(|&c| inner.covers_point(c))
-                .map(|c| (c, r))
-        })
-        .collect();
-    let (sin, cos) = canvas.angle.to_radians().sin_cos();
-    let at = canvas.anchor.resolve((0.0, 0.0));
+    let frame = Frame::new(canvas.origin, canvas.angle);
+    let bend = spacing * 2.0;
+    // Knots: on a lattice of cells 30 spacings wide, each cell holding
+    // `knots` of them on average, at a place and size of its own.
+    let cell = spacing * 30.0;
+    let max_r = spacing * 6.0;
+    let (u0, u1, v0, v1) = frame.span(&canvas.limit, max_r * 3.0);
+    let mut knot_list: Vec<(Pt, f64)> = Vec::new();
+    if knots > 0.0 {
+        for j in crate::anchor::indices(v0, v1, cell) {
+            for i in crate::anchor::indices(u0, u1, cell) {
+                let mut rng = Rng::new(crate::anchor::cell_seed(canvas.seed ^ 0x6B07, i, j));
+                let n = knots.floor() as usize + usize::from(rng.unit() < knots.fract());
+                for _ in 0..n {
+                    let c = ((i as f64 + rng.unit()) * cell, (j as f64 + rng.unit()) * cell);
+                    let r = spacing * rng.range(3.5, 6.0);
+                    if c.0 > u0 - r * 3.0 && c.0 < u1 + r * 3.0 && c.1 > v0 - r * 3.0 && c.1 < v1 + r * 3.0 {
+                        knot_list.push((c, r));
+                    }
+                }
+            }
+        }
+    }
     let f = |p: Pt| {
-        let (along, across) = {
-            let q = (p.0 - at.0, p.1 - at.1);
-            (q.0 * cos + q.1 * sin, -q.0 * sin + q.1 * cos)
-        };
-        let mut g = across + spacing * 2.0 * tools.noise(along / (spacing * 25.0), across / (spacing * 6.0), 3);
-        for &(k, r) in &knots {
-            let d2 = ((p.0 - k.0).powi(2) + (p.1 - k.1).powi(2)) / (r * r);
-            g += 1.3 * r * (-d2).exp();
+        let (along, across) = frame.to_frame(p);
+        let mut g = across + bend * tools.noise(along / (spacing * 25.0), across / (spacing * 6.0), 3);
+        for &(k, r) in &knot_list {
+            let d2 = ((along - k.0).powi(2) + (across - k.1).powi(2)) / (r * r);
+            if d2 < 16.0 {
+                g += 1.3 * r * (-d2).exp();
+            }
         }
         g
     };
-    let reach = (maxx - minx).hypot(maxy - miny) + spacing * 20.0;
-    tools.on(&canvas.limit).isolines(
-        (spacing / 8.0).clamp(0.08, 0.4),
-        &levels_every(-reach, reach, spacing),
-        f,
-    )
+    // The field ranges over the region's own span across the grain, plus
+    // the bend and the knots' bulge.
+    let (_, _, a0, a1) = frame.span(&canvas.limit, 0.0);
+    let lo = a0 - bend * 1.5 - spacing;
+    let hi = a1 + bend * 1.5 + 1.3 * max_r + spacing;
+    tools.on(&canvas.limit).isolines((spacing / 8.0).clamp(0.08, 0.4), &levels_every(lo, hi, spacing), f)
 }
 
 /// Parched ground / mud cracks: rounded Voronoi cells with wide gaps between

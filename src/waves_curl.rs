@@ -35,7 +35,7 @@ pub(crate) fn draw_curl_waves(c: &Canvas, _t: &Tools) -> Strokes {
     let turns = c.custom.get_or("turns", 0.95).clamp(0.3, 3.0);
     let flip = c.custom.get_or("flip", 0.0) >= 0.5;
     let stagger = c.custom.get_or("stagger", 0.0);
-    let mut unit = wave_unit(period, r, turns);
+    let mut unit = wave_unit(period, r, r, turns);
     if flip {
         for p in unit.iter_mut() {
             p.0 = period - p.0;
@@ -70,14 +70,16 @@ pub(crate) fn draw_curl_waves(c: &Canvas, _t: &Tools) -> Strokes {
 }
 
 /// One wave, in a frame where the row runs along +x and +y is down (the
-/// page's way): from the trough at `(0, r)` up the back to the crest at
-/// `(period, -r)`, then over and down into a clockwise spiral whose outer
-/// bottom lands on the next wave's trough at `(period, r)`.
-fn wave_unit(period: f64, r: f64, turns: f64) -> Vec<Pt> {
+/// page's way): from the trough at `(0, amp)` up the back to the crest at
+/// `(period, -amp)`, then over and down into a clockwise spiral of radius
+/// `hook`, winding in by `turns`. With `hook == amp` the spiral's outer
+/// bottom lands on the next wave's trough at `(period, amp)`; a smaller hook
+/// hangs above it.
+pub(crate) fn wave_unit(period: f64, amp: f64, hook: f64, turns: f64) -> Vec<Pt> {
     let mut pts = Vec::new();
     // The back: a cubic from the trough to the crest, flat at both ends.
-    let (s, k) = ((0.0, r), (period, -r));
-    let (c1, c2) = ((period * 0.4, r), (period * 0.5, -r * 1.25));
+    let (s, k) = ((0.0, amp), (period, -amp));
+    let (c1, c2) = ((period * 0.4, amp), (period * 0.5, -amp * 1.25));
     let n = 28;
     for i in 0..n {
         let t = i as f64 / n as f64;
@@ -87,15 +89,15 @@ fn wave_unit(period: f64, r: f64, turns: f64) -> Vec<Pt> {
             u * u * u * s.1 + 3.0 * u * u * t * c1.1 + 3.0 * u * t * t * c2.1 + t * t * t * k.1,
         ));
     }
-    // The curl: around (period, 0) from the top, clockwise on the page,
-    // winding in from `r` to a third of it.
-    let c = (period, 0.0);
+    // The curl: from the crest, clockwise on the page, winding in from
+    // `hook` to under half of it.
+    let c = (period, -amp + hook);
     let sweep = TAU * turns;
     let m = (48.0 * turns).ceil() as usize;
     for i in 0..=m {
         let t = i as f64 / m as f64;
         let th = -FRAC_PI_2 + sweep * t;
-        let rr = r * (1.0 - 0.55 * t.powf(1.3));
+        let rr = hook * (1.0 - 0.55 * t.powf(1.3));
         pts.push((c.0 + rr * th.cos(), c.1 + rr * th.sin()));
     }
     pts
