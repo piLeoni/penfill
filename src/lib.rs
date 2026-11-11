@@ -8,6 +8,7 @@
 //! spacing (mm) and returns open polylines in mm, in draw order.
 
 pub mod anchor;
+pub mod catalog;
 pub mod chess;
 pub mod clouds;
 pub mod concentric;
