@@ -70,6 +70,7 @@ pub static HATCH: Generator = Generator {
     angle: 0.0,
     options: &[&CROSS, &JOIN, &DASH, &DASH_JITTER, &WOBBLE, &WOBBLE_LENGTH, &VARY, &DENSITY, &CONTRAST, &FEATURE, &TOWARD],
     own_mask: false,
+    inset: 0.0,
     draw,
 };
 

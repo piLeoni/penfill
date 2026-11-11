@@ -60,6 +60,7 @@ pub static CELLS: Generator = Generator {
     angle: 0.0,
     options: &[&STYLE, &GAP, &ROUND, &VARY, &JITTER, &INNER, &DENSITY, &CONTRAST, &FEATURE, &TOWARD],
     own_mask: true,
+    inset: 0.0,
     draw,
 };
 

@@ -70,6 +70,7 @@ pub static TILE: Generator = Generator {
     angle: 0.0,
     options: &[&MOTIF, &SIZE, &SHIFT, &GAP, &JITTER, &PAT],
     own_mask: false,
+    inset: 0.0,
     draw,
 };
 

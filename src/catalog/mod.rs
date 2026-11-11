@@ -55,6 +55,9 @@ pub struct Generator {
     /// Whether it registers its own mask (shapes it covers), so hosts can
     /// mask what lies under its marks rather than under the whole area.
     pub own_mask: bool,
+    /// Margin in mm taken off the area before drawing when the host sets
+    /// none (waves keep a hair off the shore line drawn round them).
+    pub inset: f64,
     pub draw: fn(&Canvas, &Tools, &Args) -> Strokes,
 }
 
@@ -286,7 +289,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
             angle: spec.angle.unwrap_or(g.angle),
             salt: 0,
             edge: spec.edge,
-            inset: spec.inset,
+            inset: spec.inset.or((g.inset > 0.0).then_some(g.inset)),
             values,
         }]);
     }
@@ -336,7 +339,7 @@ fn plan<'a>(name: &str, spec: &'a Spec) -> Result<Vec<Planned<'a>>, CatalogError
                 values.push((key, v.clone()));
             }
         }
-        out.push(Planned { generator: g, spacing, angle, salt: i as u64, edge: spec.edge.or(edge), inset: spec.inset.or(inset), values });
+        out.push(Planned { generator: g, spacing, angle, salt: i as u64, edge: spec.edge.or(edge), inset: spec.inset.or(inset).or((g.inset > 0.0).then_some(g.inset)), values });
     }
     Ok(out)
 }

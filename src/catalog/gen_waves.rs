@@ -96,6 +96,8 @@ pub static WAVES: Generator = Generator {
     angle: 0.0,
     options: &[&SHAPE, &WAVELENGTH, &AMPLITUDE, &CROSS, &STAGGER, &FLIP, &ROUND, &CURL, &TURNS, &DRIFT, &BREAKS],
     own_mask: false,
+    // A hair of clearance, so the waves never touch the shore line drawn round them.
+    inset: 0.1,
     draw,
 };
 
@@ -300,8 +302,9 @@ mod tests {
     fn wavelength_and_amplitude_are_millimetres() {
         // A sine's ink per row grows with its amplitude at a fixed wavelength.
         let sq = rect(0.0, 0.0, 20.0, 20.0);
-        let flat = ink(&waves(&sq, Spec::default().option("amplitude", 0.0)));
-        let tall = ink(&waves(&sq, Spec::default().option("amplitude", 1.0).option("wavelength", 4.0)));
+        // No inset: the waves' hair of clearance would shorten the rows.
+        let flat = ink(&waves(&sq, Spec::default().inset(0.0).option("amplitude", 0.0)));
+        let tall = ink(&waves(&sq, Spec::default().inset(0.0).option("amplitude", 1.0).option("wavelength", 4.0)));
         // 21 rows of 20 mm; a sine 1 mm high every 4 mm is about 1.46× longer.
         assert!((flat / (21.0 * 20.0) - 1.0).abs() < 0.08, "flat {flat}");
         assert!((tall / flat - 1.46).abs() < 0.08, "tall/flat {}", tall / flat);
