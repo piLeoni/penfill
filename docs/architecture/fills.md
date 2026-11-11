@@ -25,7 +25,7 @@ These consume the region's inset contours and have **no anchor**.
 
 | Module | Fill(s) | Notes |
 | --- | --- | --- |
-| `concentric.rs` | `fill_concentric` | outer wall inset repeatedly; centreline where a part is too thin for a ring; `gap_fill`, `solid_outers`, `signed_area` helpers |
+| `concentric.rs` | `fill_concentric`, `fill_offsets` | `concentric`: outer wall inset repeatedly (holes stop the rings); centreline where a part is too thin for a ring. `offsets`: every edge, holes included, inset by one spacing per round (mitred), so networks such as streets round blocks fill evenly; `gap_fill`, `solid_outers`, `signed_area` helpers |
 | `spiral.rs` | `fill_spiral` | one path per lobe, `STEPS = 8` inset contours per spacing; laps between neighbouring contours so tips pull in faster than sides |
 | `zigzag.rs` | `fill_zigzag*` | sweep lines joined into serpentines; `MAX_HOP_TIMES_SPACING = 6.0` lifts the pen for long turns |
 | `hilbert.rs` | `fill_hilbert` | space-filling Hilbert curve, one pen-down path, power-of-two grid, order clamped 1..12 |

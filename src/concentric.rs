@@ -39,6 +39,30 @@ pub fn fill_concentric(region: &Region, spacing: f64, inset_mm: Option<f64>) -> 
     rings
 }
 
+/// Offset rings from every edge, holes included: the region inset by half a
+/// spacing, then by one spacing per round, every contour of every round drawn
+/// closed. Where [`fill_concentric`] lets a hole stop the rings, here each
+/// hole pushes rings of its own, so a network (streets round city blocks)
+/// fills evenly. Mitred insets keep corners sharp.
+pub fn fill_offsets(region: &Region, spacing: f64, inset_mm: Option<f64>) -> Strokes {
+    if region.is_empty() || spacing <= 0.0 {
+        return vec![];
+    }
+    let mut out = Vec::new();
+    let mut current = region.inset(inset_mm.unwrap_or(spacing / 2.0));
+    for _ in 0..MAX_ROUNDS {
+        if current.is_empty() {
+            break;
+        }
+        for mut ring in current.all_rings_mm().into_iter().filter(|r| r.len() >= 3) {
+            ring.push(ring[0]);
+            out.push(ring);
+        }
+        current = current.inset(spacing);
+    }
+    out
+}
+
 /// The rings and the centrelines of one piece.
 fn piece_rings(piece: &Region, spacing: f64, inset: f64) -> (Strokes, Strokes) {
     let mut rings = Vec::new();
@@ -243,6 +267,25 @@ mod tests {
             rings[0].iter().any(|&(x, y)| x == 0.5 && y == 0.5),
             "first ring {:?}",
             rings[0][0]
+        );
+    }
+
+    #[test]
+    fn offsets_ring_round_holes() {
+        // A 20mm square with a 10mm hole: a 5mm-wide frame. Concentric stops
+        // at the hole; offsets rings both edges until the frame is used up.
+        let outer = vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
+        let hole = vec![(5.0, 5.0), (5.0, 15.0), (15.0, 15.0), (15.0, 5.0)];
+        let frame = Region::from_polygons(&[vec![outer, hole]]);
+        let rings = fill_offsets(&frame, 1.0, None);
+        // Insets 0.5 and 1.5 leave a frame; at 2.5 the two sides meet. Two
+        // rounds, two rings each (outer edge + hole edge).
+        assert_eq!(rings.len(), 4, "got {}", rings.len());
+        assert!(rings.iter().all(|r| r.first() == r.last()), "rings come back closed");
+        // The first round includes the hole grown by half a spacing (mitred).
+        assert!(
+            rings.iter().any(|r| r.iter().any(|&(x, y)| (x - 4.5).abs() < 1e-6 && (y - 4.5).abs() < 1e-6)),
+            "no ring round the hole"
         );
     }
 
