@@ -328,7 +328,9 @@ mod tests {
     #[test]
     fn fray_thins_and_erodes_small_closed_cells() {
         let r = square();
-        let pebbles = crate::nature::fill_pebbles(&r, 3.0, 9);
+        // Small closed rings: pebble outlines from the catalogue's scatter.
+        let spec = crate::catalog::Spec::default().spacing(3.0).seed(9).option("motif", "pebble").option("mark", 1.6);
+        let pebbles = crate::catalog::fill("scatter", &r, &spec).unwrap().strokes;
         let frayed = fray_strokes(&r, pebbles.clone(), 3.0, 10.0, 9);
         let orig_ink: f64 = pebbles.iter().map(|s| polyline_length(s)).sum();
         let frayed_ink: f64 = frayed.iter().map(|s| polyline_length(s)).sum();
