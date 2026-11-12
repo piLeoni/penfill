@@ -22,13 +22,13 @@ function groupFills(names: string[]) {
 }
 
 /** Line-style fills use hatch inset; others shrink the clip region when inset > 0. */
-const HATCH_INSET_FILLS = new Set(["zigzag", "rectilinear", "concentric", "hilbert"]);
+const HATCH_INSET_FILLS = new Set(["serpentine", "lines", "concentric", "hilbert"]);
 
 export default function App() {
   const { ready, error, api } = usePenfill();
   const groups = useMemo(() => (api ? groupFills(api.fillNames) : null), [api]);
 
-  const [fill, setFill] = useState("zigzag");
+  const [fill, setFill] = useState("serpentine");
   const [spacing, setSpacing] = useState(6);
   const [angle, setAngle] = useState(45);
   const [seed, setSeed] = useState(42);

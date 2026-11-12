@@ -380,12 +380,12 @@ macro_rules! registry_js_fill {
 registry_js_fill!(
     /// Parallel hatch, one stroke per fragment.
     rectilinear,
-    "rectilinear"
+    "lines"
 );
 registry_js_fill!(
     /// Hatch joined into serpentines; the pen lifts only where a join would leave the shape.
     zigzag,
-    "zigzag"
+    "serpentine"
 );
 registry_js_fill!(
     /// One-direction hatch over the whole region.
@@ -395,12 +395,12 @@ registry_js_fill!(
 registry_js_fill!(
     /// Two hatches at 90°.
     grid,
-    "grid"
+    "crosshatch"
 );
 registry_js_fill!(
     /// Three hatches at 60° sharing every crossing.
     triangles,
-    "triangles"
+    "triad"
 );
 
 /// Closed rings following the outline inwards.
@@ -536,7 +536,7 @@ registry_js_fill!(
 registry_js_fill!(
     /// Ogee: mirrored waves closing into diamonds.
     wave_grid,
-    "wave_grid"
+    "wave-net"
 );
 registry_js_fill!(
     /// Fish scales; each row of arcs is one stroke.
@@ -846,16 +846,6 @@ registry_js_fill!(
     "sprouts"
 );
 registry_js_fill!(
-    /// Grass as short strokes aligned to a smooth vector field.
-    fluid_grass,
-    "fluid_grass"
-);
-registry_js_fill!(
-    /// Lily pads: merged overlapping circle outlines with centre dots.
-    lily_pads,
-    "lily_pads"
-);
-registry_js_fill!(
     /// Top-down tree canopies: clustered wobbly lobes with centre dots.
     canopy,
     "canopy"
@@ -863,7 +853,7 @@ registry_js_fill!(
 registry_js_fill!(
     /// Clustered columns of short curved grass/sedge blades and V-tufts.
     tufts,
-    "tufts"
+    "grass"
 );
 registry_js_fill!(
     /// Scattered branched twigs.
@@ -873,12 +863,12 @@ registry_js_fill!(
 registry_js_fill!(
     /// Parallel meandering stems with alternating side-shoots.
     vines,
-    "vines"
+    "vineyard"
 );
 registry_js_fill!(
     /// Single-line Voronoi polygonal crack network.
     cell_net,
-    "cell_net"
+    "cracked-earth"
 );
 registry_js_fill!(
     /// Flowing wave streamlines integrated around spiral eddies.
@@ -903,12 +893,12 @@ registry_js_fill!(
 registry_js_fill!(
     /// Nested contour rings around metaballs or noise mountains.
     isoline_blobs,
-    "isoline_blobs"
+    "isoline-blobs"
 );
 registry_js_fill!(
     /// Stacked 3D metaball crowns with hidden-line occlusion.
     isoline_stack,
-    "isoline_stack"
+    "isoline-stack"
 );
 
 // ---- CAD patterns ----

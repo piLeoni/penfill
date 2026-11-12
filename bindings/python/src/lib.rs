@@ -437,12 +437,12 @@ macro_rules! registry_pyfill {
 registry_pyfill!(
     /// Parallel hatch, one stroke per fragment.
     rectilinear,
-    "rectilinear"
+    "lines"
 );
 registry_pyfill!(
     /// Hatch joined into serpentines; the pen lifts only where a join would leave the shape.
     zigzag,
-    "zigzag"
+    "serpentine"
 );
 
 /// One-direction hatch over the whole region.
@@ -482,7 +482,7 @@ fn grid<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "grid", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
+    fill(py, region, "crosshatch", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Three hatches at 60° sharing every crossing.
@@ -502,7 +502,7 @@ fn triangles<'py>(
     seed: u64,
     with_mask: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    fill(py, region, "triangles", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
+    fill(py, region, "triad", spacing, angle, seed, inset, edge, fray, anchor, shift, None, with_mask)
 }
 
 /// Closed rings following the outline inwards.
@@ -1084,16 +1084,6 @@ nature_pyfill!(
     "sprouts"
 );
 nature_pyfill!(
-    /// Grass as short strokes aligned to a smooth vector field.
-    fluid_grass,
-    "fluid_grass"
-);
-nature_pyfill!(
-    /// Lily pads: merged overlapping circle outlines with centre dots.
-    lily_pads,
-    "lily_pads"
-);
-nature_pyfill!(
     /// Top-down tree canopies: clustered wobbly lobes with centre dots.
     canopy,
     "canopy"
@@ -1101,7 +1091,7 @@ nature_pyfill!(
 nature_pyfill!(
     /// Clustered columns of short curved grass/sedge blades and V-tufts.
     tufts,
-    "tufts"
+    "grass"
 );
 nature_pyfill!(
     /// Scattered branched twigs.
@@ -1111,12 +1101,12 @@ nature_pyfill!(
 nature_pyfill!(
     /// Parallel meandering stems with alternating side-shoots.
     vines,
-    "vines"
+    "vineyard"
 );
 nature_pyfill!(
     /// Single-line Voronoi polygonal crack network.
     cell_net,
-    "cell_net"
+    "cracked-earth"
 );
 nature_pyfill!(
     /// Flowing wave streamlines integrated around spiral eddies.
@@ -1141,12 +1131,12 @@ nature_pyfill!(
 nature_pyfill!(
     /// Nested contour rings around metaballs or noise mountains.
     isoline_blobs,
-    "isoline_blobs"
+    "isoline-blobs"
 );
 nature_pyfill!(
     /// Stacked 3D metaball crowns with hidden-line occlusion.
     isoline_stack,
-    "isoline_stack"
+    "isoline-stack"
 );
 
 // ---- CAD patterns ----
@@ -1769,8 +1759,6 @@ fn penfill(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pebbles, m)?)?;
     m.add_function(wrap_pyfunction!(leaves, m)?)?;
     m.add_function(wrap_pyfunction!(sprouts, m)?)?;
-    m.add_function(wrap_pyfunction!(fluid_grass, m)?)?;
-    m.add_function(wrap_pyfunction!(lily_pads, m)?)?;
     m.add_function(wrap_pyfunction!(canopy, m)?)?;
     m.add_function(wrap_pyfunction!(tufts, m)?)?;
     m.add_function(wrap_pyfunction!(twigs, m)?)?;
