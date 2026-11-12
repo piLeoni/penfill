@@ -58,6 +58,10 @@ pub struct Generator {
     /// Margin in mm taken off the area before drawing when the host sets
     /// none (waves keep a hair off the shore line drawn round them).
     pub inset: f64,
+    /// Whether drawing an area in pieces gives the same lines as drawing it
+    /// whole (with a clipped edge, no fray and a tone that does not follow
+    /// the border): what lets a host stream a huge fill tile by tile.
+    pub tiles: bool,
     pub draw: fn(&Canvas, &Tools, &Args) -> Strokes,
 }
 
@@ -123,6 +127,39 @@ pub fn own_mask(name: &str) -> bool {
         (None, Some(m)) => m.layers.iter().any(|l| generator(l.generator).is_some_and(|g| g.own_mask)),
         _ => false,
     }
+}
+
+/// Whether `name` with `spec` can be drawn tile by tile, and if so the inset
+/// to take off the whole area first (each tile is then drawn with none, so
+/// tiles never inset their own seams). `None` when any layer depends on the
+/// area's true outline: an `inside` or `overflow` edge, a fray, a tone that
+/// follows the edge, centre or a gradient, a serpentine join, or a generator
+/// that draws the shape as a whole (rings, crowns, clouds…).
+pub fn tileable(name: &str, spec: &Spec) -> Option<f64> {
+    if spec.fray > 0.0 || !matches!(spec.edge, None | Some(EdgeMode::Clip)) {
+        return None;
+    }
+    let layers = plan(name, spec).ok()?;
+    let mut inset = None;
+    for l in &layers {
+        if !l.generator.tiles || !matches!(l.edge, None | Some(EdgeMode::Clip)) {
+            return None;
+        }
+        for (k, v) in &l.values {
+            match (*k, v) {
+                ("density", Value::Text(t)) if t != "even" && t != "noise" => return None,
+                ("join", Value::Flag(true)) => return None,
+                _ => {}
+            }
+        }
+        let i = l.inset.unwrap_or(0.0);
+        match inset {
+            None => inset = Some(i),
+            Some(j) if (j - i).abs() > 1e-9 => return None,
+            _ => {}
+        }
+    }
+    inset
 }
 
 /// The generators a material draws with (an alias, its own), in layer order.
@@ -609,6 +646,34 @@ mod tests {
             let (whole, halves) = (ink(&rect(0.0, 40.0)), ink(&rect(0.0, 17.3)) + ink(&rect(17.3, 40.0)));
             assert!((whole - halves).abs() < 0.02 * whole, "{spec:?}: {whole} vs {halves}");
         }
+    }
+
+    #[test]
+    fn what_says_it_tiles_draws_the_same_in_tiles() {
+        // Whole, and as four tiles meeting at an off-lattice point: the same
+        // ink, for every pattern that claims to tile at its defaults.
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Region::from_ring(&[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]);
+        let (x0, y0, x1, y1, mx, my) = (13.0, 17.0, 73.0, 57.0, 41.37, 38.91);
+        let mut tiled = 0;
+        let mut wrong = Vec::new();
+        for name in names() {
+            let spec = Spec::default().anchor(Anchor::GLOBAL);
+            let Some(inset) = tileable(name, &spec) else { continue };
+            tiled += 1;
+            let whole_region = rect(x0, y0, x1, y1).inset(inset.max(0.0));
+            let per_tile = spec.clone().inset(0.0);
+            let ink = |r: &Region| -> f64 { fill(name, r, &per_tile).unwrap().strokes.iter().map(|s| crate::geo::polyline_length(s)).sum() };
+            let whole = ink(&whole_region);
+            let parts: f64 = [rect(x0, y0, mx, my), rect(mx, y0, x1, my), rect(x0, my, mx, y1), rect(mx, my, x1, y1)]
+                .iter()
+                .map(|t| ink(&whole_region.intersection(t)))
+                .sum();
+            if (whole - parts).abs() > 0.02 * whole.max(1e-9) {
+                wrong.push(format!("{name}: whole {whole:.1} vs tiles {parts:.1}"));
+            }
+        }
+        assert!(wrong.is_empty(), "claim to tile but do not:\n{}", wrong.join("\n"));
+        assert!(tiled > 30, "only {tiled} patterns tile");
     }
 
     #[test]

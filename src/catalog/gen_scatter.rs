@@ -59,6 +59,7 @@ pub static SCATTER: Generator = Generator {
     options: &[&ARRANGE, &MOTIF, &MARK, &ROTATE, &VARY, &JITTER, &OVERLAP, &DENSITY, &CONTRAST, &FEATURE, &TOWARD],
     own_mask: true,
     inset: 0.0,
+    tiles: true,
     draw,
 };
 

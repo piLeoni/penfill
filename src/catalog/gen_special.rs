@@ -66,6 +66,7 @@ pub static RINGS: Generator = Generator {
     options: &[&FROM, &SPIRAL],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_rings,
 };
 
@@ -96,6 +97,7 @@ pub static SCRIBBLE: Generator = Generator {
     options: &[&LAYERS, &LOOSE, &STROKE, &DENSITY, &CONTRAST, &FEATURE, &TOWARD],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_scribble,
 };
 
@@ -127,6 +129,7 @@ pub static HILBERT: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_hilbert,
 };
 
@@ -142,6 +145,7 @@ pub static TRUCHET: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_truchet,
 };
 
@@ -159,6 +163,7 @@ pub static HONEYCOMB: Generator = Generator {
     options: &[&WALLS],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_honeycomb,
 };
 
@@ -175,6 +180,7 @@ pub static SCALES: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_scales,
 };
 
@@ -197,6 +203,7 @@ pub static SUNBURST: Generator = Generator {
     options: &[&CENTRE],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_sunburst,
 };
 
@@ -222,6 +229,7 @@ pub static WOOD: Generator = Generator {
     options: &[&KNOTS],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_wood,
 };
 
@@ -237,6 +245,7 @@ pub static MARBLE: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw: draw_marble,
 };
 
@@ -252,6 +261,7 @@ pub static SWELLS: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_swells,
 };
 
@@ -267,6 +277,7 @@ pub static EDDIES: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_eddies,
 };
 
@@ -282,6 +293,7 @@ pub static RIPPLES: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_ripples,
 };
 
@@ -301,6 +313,7 @@ pub static CANOPY: Generator = Generator {
     options: &[],
     own_mask: true,
     inset: 0.0,
+    tiles: false,
     draw: draw_canopy,
 };
 
@@ -319,6 +332,7 @@ pub static TWIGS: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_twigs,
 };
 
@@ -347,6 +361,7 @@ pub static DOODLE_TREES: Generator = Generator {
     options: &[&COVERAGE_TREES, &LOOPS, &SHADOW, &LIGHT_FROM],
     own_mask: true,
     inset: 0.0,
+    tiles: true,
     draw: draw_doodle_trees,
 };
 
@@ -390,6 +405,7 @@ pub static GROWTH: Generator = Generator {
     options: &[&ROOTS, &ROOT_SPACING, &STEP, &REACH, &KILL, &GROWTH_JITTER, &PEN, &TRUNK, &COVERAGE_GROWTH, &VARIATION, &MAX_STEPS],
     own_mask: true,
     inset: 0.0,
+    tiles: false,
     draw: draw_growth,
 };
 
@@ -471,6 +487,7 @@ pub static ISOLINE_STACK: Generator = Generator {
     ],
     own_mask: true,
     inset: 0.0,
+    tiles: false,
     draw: draw_isoline_stack,
 };
 
@@ -521,6 +538,7 @@ pub static ISOLINE_BLOBS: Generator = Generator {
     options: &[&CONTOUR, &WARP, &WARP_PERIOD, &THRESHOLD],
     own_mask: true,
     inset: 0.0,
+    tiles: false,
     draw: draw_isoline_blobs,
 };
 
@@ -584,6 +602,7 @@ pub static CLOUDS: Generator = Generator {
     ],
     own_mask: true,
     inset: 0.0,
+    tiles: false,
     draw: draw_clouds,
 };
 
@@ -624,6 +643,7 @@ pub static SOLID: Generator = Generator {
     options: &[],
     own_mask: false,
     inset: 0.0,
+    tiles: false,
     draw: draw_solid,
 };
 

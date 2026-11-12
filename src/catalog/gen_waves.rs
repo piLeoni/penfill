@@ -98,6 +98,7 @@ pub static WAVES: Generator = Generator {
     own_mask: false,
     // A hair of clearance, so the waves never touch the shore line drawn round them.
     inset: 0.1,
+    tiles: true,
     draw,
 };
 

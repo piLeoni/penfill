@@ -71,6 +71,7 @@ pub static TILE: Generator = Generator {
     options: &[&MOTIF, &SIZE, &STAGGER, &GAP, &JITTER, &PAT],
     own_mask: false,
     inset: 0.0,
+    tiles: true,
     draw,
 };
 
