@@ -1,10 +1,10 @@
 [package]
 name = "penfill"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Fills and hatches for pen plotters: zigzag, spiral, lattices, stipple, gravel, marble, CAD .pat patterns, your own functions and SVG tiles."
-repository = "https://github.com/pileoni/penfill"
+description = "Fills and hatches for pen plotters: a catalogue of materials (water, vegetation, ground, rock, built) over generators that describe their own options, map symbols, CAD .pat hatches, and your own patterns."
+repository = "https://github.com/piLeoni/penfill"
 readme = "README.md"
 keywords = ["plotter", "infill", "hatch", "zigzag", "svg"]
 categories = ["graphics", "algorithms"]
@@ -14,10 +14,10 @@ exclude = ["examples/gallery/*", "docs/*", "bindings/*", "web/*", ".github/*", "
 members = ["bindings/python", "bindings/node", "bindings/wasm"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/pileoni/penfill"
+repository = "https://github.com/piLeoni/penfill"
 
 [dependencies]
 i_overlay = "4.5"         # offsetting + boolean clipping, pure Rust (the engine under geo)
