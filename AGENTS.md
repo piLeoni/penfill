@@ -17,13 +17,14 @@ draw order. Lines stay inside the region and go around its holes.
 | Geometry kernel: `Region`, clipping, insetting, routing | `src/geo.rs` | `docs/architecture/geometry.md` |
 | Scanlines / hatching primitives | `src/sweep.rs`, `src/grid.rs` | `docs/architecture/geometry.md` |
 | Lattice placement (`Anchor`) and region-relative placement | `src/anchor.rs`, `src/placement.rs` | `docs/architecture/placement.md` |
-| The ~50 pattern fills | `src/*.rs` | `docs/architecture/fills.md` |
+| The catalogue: generators (self-describing), materials by group, the symbol library | `src/catalog/` | `docs/architecture/catalog.md` |
+| The algorithm modules the generators use or wrap (`zigzag`, `concentric`, `textures`, `growth`, …) | `src/*.rs` | `docs/architecture/fills.md` |
 | Zero-noise primitives: RNG, Perlin, field/isolines | `src/random.rs`, `src/noise.rs`, `src/field.rs` | `docs/architecture/primitives.md` |
 | User-supplied patterns and tiles | `src/pattern.rs`, `src/tile.rs`, `src/pat.rs`, `src/svg.rs` | `docs/architecture/extensibility.md` |
 | Hand-drawn modifier (`hand`, `HandParams`): precise strokes → hand-drawn strokes | `src/hand.rs` | `docs/architecture/primitives.md` |
 | Streaming large fills (`Sink`, `Clipped`, `Meter`) | `src/stream.rs` | `docs/architecture/streaming.md` |
 | Binding layer (Python / Node / wasm) | `bindings/*/src/lib.rs` | `docs/architecture/bindings.md` |
-| Gallery sheets, plot-sheet tooling | `examples/gallery.rs`, `tools/` | `docs/architecture/tooling.md` |
+| Gallery and README pictures (drawn from the catalogue), catalogue review sheet, plot-sheet tooling | `examples/gallery.rs`, `examples/catalog_sheet.rs`, `tools/` | `docs/architecture/tooling.md` |
 
 ## Documentation rules
 
@@ -47,5 +48,6 @@ binding in the same step unless asked.
 
 ```sh
 cargo test                              # core crate
-cargo run --example gallery --release   # regenerate example/gallery/*.svg
+cargo run --example gallery --release   # regenerate examples/gallery/*.svg and docs/img/*.svg
+cargo run --release --example catalog_sheet -- out.svg [name key=value … '|' …]   # look at patterns
 ```

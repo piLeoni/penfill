@@ -6,22 +6,32 @@ zigzags that barely lift the pen, spirals, lattices, stipple, gravel, grass,
 marble, AutoCAD `.pat` hatches, dithered photos, your own functions or your own SVG tiles.
 Every line stays inside the shape and goes around its holes.
 
-![Zigzag fills, one colour per pen-down, next to how many strokes plain hatching needs](https://raw.githubusercontent.com/pileoni/penfill/master/docs/img/hero.svg)
+![Serpentine fills, one colour per pen-down, next to how many strokes plain hatching needs](https://raw.githubusercontent.com/pileoni/penfill/master/docs/img/hero.svg)
 
 ```sh
 npm install penfill
 ```
 
 ```js
-import { Region, zigzag, toSvg } from 'penfill'
+import { Region, fill, toSvg } from 'penfill'
 import { writeFileSync } from 'node:fs'
 
 const square = [[0, 0], [80, 0], [80, 60], [0, 60]]
 const hole = [[30, 20], [50, 20], [50, 40], [30, 40]]
 const shape = new Region(square, [hole])
 
-const strokes = zigzag(shape, 1.0, { angle: 45 })  // array of polylines, in drawing order
-writeFileSync('zigzag.svg', toSvg(strokes, shape))
+const strokes = fill(shape, 'serpentine', 1.0, { angle: 45 })  // array of polylines, in drawing order
+writeFileSync('serpentine.svg', toSvg(strokes, shape))
+```
+
+Every pattern in the catalogue is a name: materials such as `'gravel'`,
+`'marsh'`, `'limestone'`, `'herringbone'`, and the generators under them
+(`'hatch'`, `'scatter'`, `'cells'`, …). `fills()` lists them; numeric
+options go in `custom`:
+
+```js
+const stones = fill(shape, 'gravel', 2.0, { fray: 8, seed: 7 })
+const grid = fill(shape, 'hatch', 0.8, { custom: { cross: 2 } })
 ```
 
 Photos and SVGs are placed like a CSS background, then clipped to the shape:

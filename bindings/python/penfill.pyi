@@ -16,7 +16,8 @@ __version__: str
 PATTERNS: list[str]
 """Names of the built-in `.pat` patterns."""
 FILLS: list[str]
-"""Names of all built-in fills supported by `fill` and `fill_output`."""
+"""Every name `fill` and `fill_output` take: the catalogue's materials, then
+its generators (e.g. `"gravel"`, `"serpentine"`, `"limestone"`, `"hatch"`)."""
 
 class Region:
     """A filled area: outer rings with optional holes."""
@@ -102,7 +103,13 @@ def fill(
     shift: Point = (0.0, 0.0),
     custom: Optional[dict[str, float]] = None,
     with_mask: bool = False,
-) -> Union[Strokes, FillOutput]: ...
+) -> Union[Strokes, FillOutput]:
+    """Pattern `name` from the catalogue (a material or a generator; see
+    `FILLS`). `spacing` defaults to 2 mm here, not the material's own.
+    `custom` passes the generator's numeric options (`{"cross": 2}`); keys
+    the pattern does not take are ignored, and word, list or polyline options
+    (`motif`, `shape`, `dash`, `pat`) are not reachable from this function.
+    An unknown name raises `KeyError`."""
 
 def fill_output(
     region: Region,
@@ -117,7 +124,8 @@ def fill_output(
     anchor: Anchor = "local",
     shift: Point = (0.0, 0.0),
     custom: Optional[dict[str, float]] = None,
-) -> FillOutput: ...
+) -> FillOutput:
+    """Like `fill`, always returning `FillOutput(strokes, mask)`."""
 
 # lines and paths
 def rectilinear(region: Region, spacing: float, angle: float = 0.0, inset: Optional[float] = None, anchor: Anchor = "local", shift: Point = (0.0, 0.0), *, seed: int = 0, edge: Optional[EdgeSpec] = None, fray: float = 0.0, with_mask: bool = False) -> Union[Strokes, FillOutput]: ...

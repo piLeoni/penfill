@@ -329,13 +329,13 @@ pub type SeedOptions = FillOptions;
 pub type ConcentricOptions = FillOptions;
 pub type CracksOptions = FillOptions;
 
-/// Names of all built-in fills supported by `fill` and `fillOutput`.
+/// Every name `fill` and `fillOutput` take: the catalogue's materials, then its generators.
 #[napi]
 pub fn fills() -> Vec<String> {
     pf::all_fill_names()
 }
 
-/// Run any built-in pattern by name with unified `FillOptions`.
+/// Pattern `name` from the catalogue (a material or a generator; see `fills()`). `spacing` defaults to 2 mm; `custom` passes the generator's numeric options (`{ cross: 2 }`), keys it does not take are ignored.
 #[napi(ts_return_type = "Array<Array<[number, number]>>")]
 pub fn fill(
     region: &Region,

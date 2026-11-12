@@ -87,3 +87,33 @@ Every built-in pattern and user-supplied pattern shares `FillParams` (`spacing`,
   buffering for line/mark/frayed fills) so foreground layers can cut lower
   layers cleanly via `below.difference(&out.mask)`.
 
+
+## The catalogue: generators and materials replace the flat registry
+
+The name registry had grown to ~117 flat names (`zigzag`, `stipple-edge`,
+`pat:BRICK`, 54 geology fills, …). About half were the same five algorithms
+with constants baked in and a rock name attached, so it was large to read and
+small in what it could do: no way to say "these marks, sparser near the
+shore", no custom symbol, `spacing` meaning something different on every
+pattern (draw.land carried a per-name correction table), and the geology
+fills ignored the anchor, so neighbouring areas did not line up.
+
+It is replaced, not wrapped, by two layers (`src/catalog/`, see
+[catalog.md](catalog.md)):
+
+- **Generators**: a couple of dozen algorithms with one shared vocabulary
+  (`spacing` always centre to centre, `anchor` honoured everywhere, tone by
+  `density`) plus their own options, each **describing itself** (kind,
+  default, doc) so hosts validate input, name valid keys on a typo, and build
+  their reference from `describe()` rather than from hand-kept lists.
+- **Materials**: named recipes over generators, grouped by use, with every
+  length stored as a multiple of the material's spacing, so a user's
+  `spacing` scales the recipe as a whole.
+
+Consequences: old names are gone rather than aliased (`zigzag` →
+`serpentine`, `stipple-edge` → `stipple` with `density: "edge"`, `pat:NAME`
+→ `tile` with `pat`, the geology set → rock materials); `litho.rs`,
+`grass.rs` and most of `nature.rs` were deleted; `fill_by_name` resolves
+through the catalogue; and the README pictures are generated from the
+catalogue (`examples/gallery.rs`), so the docs cannot list a pattern the
+library no longer draws.

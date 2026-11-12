@@ -11,7 +11,7 @@ The pattern catalogue is two layers:
 - **Materials** are named recipes over generators: `gravel`, `marsh`,
   `limestone`, `orchard`. A material is one or more layers, each a generator
   with settings, grouped by what it is for (water, vegetation, ground, rock,
-  built, plain). Most users pick a material; anyone can drop down to the
+  built, sky, plain). Most users pick a material; anyone can drop down to the
   generator and set every option.
 
 Sources: `src/catalog/` (`mod.rs` the entry points, `value.rs` options,
@@ -75,8 +75,8 @@ Light comes from `light_angle` in page degrees (0 from the right, 90 from below)
 
 A material is `{ name, group, about, spacing, layers }`; each layer is a
 generator name and option overrides. Groups, in the order a map maker reaches
-for them: **water**, **vegetation**, **ground**, **rock**, **built**,
-**plain** (lines, grids, dots, rings: the abstract hatches). Rock materials
+for them: **water**, **vegetation**, **ground**, **rock**, **built**, **sky**
+(clouds), **plain** (lines, grids, dots, rings: the abstract hatches). Rock materials
 follow the conventions of geological maps (sandstone dots, shale dashes,
 limestone in brick bond, granite crosses, volcanic vees), so they read as the
 symbols a geologist expects rather than as invented textures.
@@ -91,7 +91,9 @@ doc) and every material (group, about, spacing, layers) as data. Hosts:
 
 - validate a fill's options against the generator's schema and name the valid
   keys in the error, instead of ignoring a typo;
-- generate their reference and swatch pages from it (draw.land's docs do);
+- generate their reference and swatch pages from it (draw.land's docs do;
+  penfill's own README pictures come from the catalogue the same way, in
+  `examples/gallery.rs`, see [tooling.md](tooling.md));
 - test that their own type declarations list exactly the catalogue's names.
 
 ## Custom patterns

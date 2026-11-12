@@ -349,8 +349,9 @@ fn finish_output<'py>(
 
 // ---- universal registry entry points ----
 
-/// Run any built-in pattern by name with unified parameters (`spacing`, `angle`,
-/// `seed`, `inset`, `edge`, `fray`, `anchor`, `shift`, `custom`, `with_mask`).
+/// Pattern `name` from the catalogue (a material or a generator; see `FILLS`)
+/// with the standard parameters (`spacing`, `angle`, `seed`, `inset`, `edge`,
+/// `fray`, `anchor`, `shift`, `with_mask`) and numeric options in `custom`.
 #[pyfunction]
 #[pyo3(signature = (region, name, spacing = 2.0, *, angle = 0.0, seed = 0, inset = None, edge = None, fray = 0.0, anchor = "local", shift = (0.0, 0.0), custom = None, with_mask = false))]
 #[allow(clippy::too_many_arguments)]

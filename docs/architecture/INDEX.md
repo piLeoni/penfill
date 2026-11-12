@@ -7,24 +7,28 @@ source files. Source code is authoritative.
 | Subsystem | Doc | Primary sources |
 | --- | --- | --- |
 | Geometry kernel | [geometry.md](geometry.md) | `src/geo.rs`, `src/sweep.rs`, `src/grid.rs` |
-| Fills | [fills.md](fills.md) | `src/zigzag.rs`, `src/spiral.rs`, `src/concentric.rs`, `src/rectilinear.rs`, `src/tile.rs`, `src/litho.rs`, `src/nature.rs`, `src/doodle.rs`, `src/waves_curl.rs`, `src/waves_flow.rs`, `src/waves_scallop.rs`, `src/textures.rs`, `src/growth.rs`, `src/fray.rs`, and the remaining `src/*.rs` fill modules |
+| Catalogue (generators, materials, symbols) | [catalog.md](catalog.md) | `src/catalog/mod.rs`, `src/catalog/materials.rs`, `src/catalog/marks.rs`, `src/catalog/gen_*.rs`, `src/catalog/points.rs`, `src/catalog/tone.rs`, `src/catalog/schema.rs`, `src/catalog/value.rs` |
+| Fills (the algorithm modules) | [fills.md](fills.md) | `src/zigzag.rs`, `src/spiral.rs`, `src/concentric.rs`, `src/rectilinear.rs`, `src/tile.rs`, `src/nature.rs`, `src/doodle.rs`, `src/waves_curl.rs`, `src/waves_flow.rs`, `src/waves_scallop.rs`, `src/textures.rs`, `src/growth.rs`, `src/fray.rs`, and the remaining `src/*.rs` fill modules |
 | Isoline blob fills | [isoline-blob-fills.md](isoline-blob-fills.md) | `src/isoline_blobs.rs`, `src/isoline_stack.rs`, `src/field.rs`, `src/noise.rs` |
 | Placement | [placement.md](placement.md) | `src/anchor.rs`, `src/placement.rs` |
 | Primitives | [primitives.md](primitives.md) | `src/random.rs`, `src/noise.rs`, `src/field.rs`, `src/hand.rs` |
 | Extensibility | [extensibility.md](extensibility.md) | `src/pattern.rs`, `src/tile.rs`, `src/pat.rs`, `src/svg.rs` |
 | Streaming | [streaming.md](streaming.md) | `src/stream.rs`, `*_into` entry points |
 | Bindings | [bindings.md](bindings.md) | `bindings/python/src/lib.rs`, `bindings/node/src/lib.rs`, `bindings/wasm/src/lib.rs`, `web/` |
-| Tooling | [tooling.md](tooling.md) | `examples/gallery.rs`, `tools/plot_sheet.py`, `tools/plotfont.py` |
+| Tooling | [tooling.md](tooling.md) | `examples/gallery.rs`, `examples/catalog_sheet.rs`, `tools/plot_sheet.py`, `tools/plotfont.py` |
 
 ## Cross-cutting facts
 
 - **Units**: millimetres everywhere; `Pt = (f64, f64)`, `Strokes = Vec<Vec<Pt>>`.
-- **Public surface**: re-exports in `src/lib.rs` — `Anchor`, `Frame`, `Origin`,
-  `Region`, `Strokes`, `polyline_length`, `fill_solid`, `Canvas`, `CustomParams`,
-  `Tools`, `FillParams`, `FillOutput`, `EdgeMode`, `fill_pattern`,
-  `fill_pattern_with`, `fill_pattern_output`, `fill_by_name`,
-  `fill_output_by_name`, `all_fill_names`, `FILL_NAMES`, `Clipped`, `Frayed`,
-  `Meter`, `Sink`, `hand`, `HandParams`.
+- **Public surface**: the catalogue, `penfill::catalog` (`fill`,
+  `fill_output`, `validate`, `Spec`, `describe`, `names`, `generators`,
+  `MATERIALS`, `Group`, `marks`); and re-exports in `src/lib.rs` — `Anchor`,
+  `Frame`, `Origin`, `Region`, `Strokes`, `polyline_length`, `fill_solid`,
+  `Canvas`, `CustomParams`, `Tools`, `FillParams`, `FillOutput`, `EdgeMode`,
+  `fill_pattern`, `fill_pattern_with`, `fill_pattern_output`, `fill_by_name`,
+  `fill_output_by_name`, `all_fill_names` (the last three resolve through the
+  catalogue), the isoline-blob types, `Clipped`, `Frayed`, `Meter`, `Sink`,
+  `hand`, `HandParams`.
 - **`MIN_SEGMENT_MM`** (`src/geo.rs`): strokes shorter than this are dropped
   as rounding artefacts, not ink.
 - **Seeding**: every random fill takes `seed: u64`; the same seed gives the

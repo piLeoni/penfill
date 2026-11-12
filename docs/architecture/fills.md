@@ -1,8 +1,24 @@
 # Fills
 
-The bulk of the crate: ~50 pattern fills, one public `fill_*` per pattern,
-each taking a `Region` (and its own parameters) and returning `Strokes` in
-draw order. All clip to the region and go around holes.
+The algorithm modules: one public `fill_*` per algorithm, each taking a
+`Region` (and its own parameters) and returning `Strokes` in draw order. All
+clip to the region and go around holes.
+
+Users reach these through the **catalogue** ([catalog.md](catalog.md)): the
+generators in `src/catalog/gen_*.rs` either implement an algorithm themselves
+(`hatch`, `scatter`, `cells`, `tile`, `waves`, on the anchored sites of
+`catalog/points.rs` and the tone of `catalog/tone.rs`) or wrap a module below
+(`gen_special.rs`: rings, scribble, hilbert, truchet, honeycomb, scales,
+sunburst, wood, marble, the seas, canopy, twigs, doodle-trees, growth, the
+isoline fills, clouds, solid). Named materials are recipes over those
+generators. `pattern::fill_by_name` resolves names through the catalogue;
+there is no other name registry.
+
+The direct functions below remain public (the Python and Node bindings call
+several of them, e.g. `gravel::fill_gravel_params`, `stipple::fill_stipple_edge`,
+`dotswaves`, `pat::fill_pat`, `tile::fill_tile`, `dither`, `svg`). Changing a
+module that a generator wraps changes the catalogue's output; check the
+gallery.
 
 Grouped by how they are built, because that determines which doc/code to read
 when changing one.
@@ -46,8 +62,7 @@ Regular cells placed on an anchored `Frame`.
 | `dotswaves.rs` | `fill_dots`, `fill_dots_with_lattice`, `fill_waves`, `fill_waves_frayed`, `fill_wave_grid`, `fill_wave_grid_frayed` | `Lattice::{Square, Hexagonal}`; `STEP = 0.1` wave march; optional perimeter-aware `fray` |
 | `scales.rs` | `fill_scales` | rows of half-circles, one continuous scalloped line per row (`ARC_STEPS = 12`) |
 | `truchet.rs` | `fill_truchet` | two quarter arcs per cell, random orientation (`ARC_STEPS = 8`); arcs meet at cell-edge midpoints to chain into long paths |
-| `grass.rs` | `fill_grass` | tile of 4×4 tufts, hand-drawn look, repeats exactly like a `.pat` |
-| `tile.rs` | `fill_tile` | arbitrary `Strokes` tile on a `width × height` grid, `row_shift` brick bond, turned by `angle`; lines may spill over the box |
+| `tile.rs` | `fill_tile` | arbitrary `Strokes` tile on a `width × height` grid, `row_shift` brick bond, turned by `angle`; lines may spill over the box. The catalogue's `tile` generator lays your own `motif` through it |
 
 ## Scattered (seeded, no lattice)
 
@@ -59,11 +74,11 @@ Poisson-disk / Voronoi based. Take no anchor.
 | `gravel.rs` | `fill_gravel`, `fill_gravel_with` | Voronoi stones, gaps and rounded corners; `GravelEdge::{Adaptive, Clipped}` at the wall |
 | `terrazzo.rs` | `fill_terrazzo` | chips of many sizes, ~⅓ dark (hatched, never solid) |
 | `scribble.rs` | `fill_scribble` | two layers (2nd turned ~70–110°), per-line tilt/spacing error, broken into strokes — hand hatching |
-| `nature.rs` | `fill_pebbles`, `fill_leaves`, `fill_sprouts`, `fill_lily_pads`, `fill_canopy`, `fill_fluid_grass`, `fill_tufts(_frayed)`, `fill_twigs(_frayed)`, `fill_vines(_frayed)` | site-plan vector textures; `fill_leaves` delegates to `fill_sprouts` |
-| `doodle.rs` | `fill_doodle_trees`, `fill_doodle_trees_params` (registry `doodle_trees`) | sketch-map tree crowns: one continuous curlicue per crown (uneven loops, sometimes a second tighter lap) plus a shade crescent away from `light_angle`; front (lower) crowns hide those behind; custom `coverage`, `loops`, `shadow`, `light_angle`; `spacing` = crown diameter |
-| `waves_curl.rs` | `fill_curl_waves`, `fill_curl_waves_params` (registry `curl_waves`) | rows of stylised breaking waves: back slope into a spiral hook, one stroke per wave; custom `wavelength`, `curl`, `turns`, `stagger`, `flip`; meant to be loosened with `hand` |
-| `waves_flow.rs` | `fill_flow_waves`, `fill_flow_waves_params` (registry `flow_waves`) | textile-style sea: level sets of `y + A·sin(2πx/λ + P)` with slowly drifting `A`/`P`, so lines bunch and spread but never cross, broken into strokes of uneven length; custom `wavelength`, `amplitude`, `drift`, `breaks` |
-| `waves_scallop.rs` | `fill_scallop_waves`, `fill_scallop_waves_params` (registry `scallop_waves`) | rows of shallow arcs meeting at upward points, one stroke per row; custom `wavelength`, `depth`, `round`, `stagger` |
+| `nature.rs` | `fill_canopy(_params)`, `fill_twigs(_frayed, _params)` | tree canopies and twigs; `canopy_at` / `twigs_at` draw one element, which the catalogue's `canopy` and `twigs` place on anchored sites. Pebbles, leaves, sprouts, tufts, vines, lily pads and the fluid grass are now `scatter` with a symbol (`catalog/marks.rs`) |
+| `doodle.rs` | `fill_doodle_trees`, `fill_doodle_trees_params` (catalogue `doodle-trees`) | sketch-map tree crowns: one continuous curlicue per crown (uneven loops, sometimes a second tighter lap) plus a shade crescent away from `light_angle`; front (lower) crowns hide those behind; custom `coverage`, `loops`, `shadow`, `light_angle`; `spacing` = crown diameter |
+| `waves_curl.rs` | `fill_curl_waves`, `fill_curl_waves_params` (catalogue: `waves` with `shape: "curl"`, via `wave_unit`) | rows of stylised breaking waves: back slope into a spiral hook, one stroke per wave; custom `wavelength`, `curl`, `turns`, `stagger`, `flip`; meant to be loosened with `hand` |
+| `waves_flow.rs` | `fill_flow_waves`, `fill_flow_waves_params` (catalogue: `waves` with `shape: "flow"`) | textile-style sea: level sets of `y + A·sin(2πx/λ + P)` with slowly drifting `A`/`P`, so lines bunch and spread but never cross, broken into strokes of uneven length; custom `wavelength`, `amplitude`, `drift`, `breaks` |
+| `waves_scallop.rs` | `fill_scallop_waves`, `fill_scallop_waves_params` (catalogue: `waves` with `shape: "scallop"`, via `scallop`) | rows of shallow arcs meeting at upward points, one stroke per row; custom `wavelength`, `depth`, `round`, `stagger` |
 
 ## Branching (space colonization)
 
@@ -123,22 +138,14 @@ Demo: `examples/growth_demo.rs` → `examples/gallery/growth-{branching,fine,jit
 - Ripples: staggered rows of medium-length wave strokes driven by a shared 2D swell field.
 - Swells: overlapping wave hills / dunes rendered foreground-to-background with a 1D horizon occlusion buffer and internal ribs that fan across each swell's slope.
 
-## Geological (`litho.rs`, large)
+## Geological
 
-A small internal **pattern language** (lattices, marks, modifiers) with a
-module-level kit, then thin public entries named after the lithology: 54
-`fill_*` entries — `fill_granite`, `fill_gneiss`, `fill_breccia`,
-`fill_diorite`, `fill_sandstone`, `fill_coal`, `fill_lava`, `fill_masonry`,
-the `*_soil` family, and so on. Every entry clips to the region.
-
-Internal kit to know before editing:
-- `stagger_grid` / `grid` / `inside_grid_seeded` — lattice iteration; the
-  seeded form draws jitter and the mark builder from **one** RNG stream in a
-  fixed order so the pattern stays reproducible.
-- `rand(seed, salt)` — one seed for both shapes and index tie-breaks.
-- Mark builders `tick`, `cross`, `x_cross`, `tee`, `vee`, `bracket`, … all
-  route through `stroke(region, out, pts)` / `seg(...)` so clipping is the
-  region's job and never the caller's.
+There is no geology module any more. The rock and soil symbols of
+geological maps are catalogue materials (`sandstone`, `shale`, `limestone`,
+`granite`, `basalt`, `clay`, `peat`, …) built from `hatch`, `scatter`,
+`cells`, `tile` and `waves` with the symbol library in `catalog/marks.rs`
+(`tick`, `plus`, `cross`, `tee`, `vee`, `bracket`, …). They honour the
+anchor, which the old `litho.rs` fills did not. See `catalog/materials.rs`.
 
 ## Special
 

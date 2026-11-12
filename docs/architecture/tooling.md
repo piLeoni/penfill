@@ -5,48 +5,70 @@ is part of the library's public Rust API.
 
 ## Gallery sheets — `examples/gallery.rs`
 
-`cargo run --example gallery --release` (requires the `image` feature) generates
-the complete vector reference gallery in `examples/gallery/*.svg` and the
-README illustration strips in `docs/img/*.svg`.
+`cargo run --example gallery --release` (requires the `image` feature, on by
+default) draws every picture in `README.md` (`docs/img/*.svg`) and the sheets
+in `examples/gallery/`.
 
-### Declarative catalog (`catalog()`)
+**The pattern pictures come from the catalogue itself**, so they cannot drift
+from the library: the material strips iterate `catalog::MATERIALS` by
+`Group`, the generator strip iterates `catalog::generators()`, the symbol
+strip iterates `catalog::marks::NAMES`, and every swatch is drawn with
+`catalog::fill` / `fill_output`. A name or option the catalogue no longer
+knows panics with the catalogue's own message instead of leaving a stale
+image. Hand-picked lists remain only for illustrations (the options strip,
+fray and edge examples, the tour), and those also go through `catalog::fill`.
 
-Instead of per-pattern closures, `examples/gallery.rs` defines a compact
-declarative table (`catalog() -> Vec<Pattern>`) covering all 99 catalog entries
-grouped into 8 `Category` families (`Lines`, `Lattices`, `Scatter`, `Materials`,
-`Organic`, `Geology`, `Ground`, `Cad`). Rendering dispatches through
-`penfill::fill_by_name` and `penfill::fill_output_by_name` using `FillParams`.
+Swatches: each pattern is drawn at its **default spacing** on a rounded card
+about 14 spacings across (`swatch_side`, 14–70 mm), so every swatch shows the
+same number of elements on screen; ring-following patterns get an island with
+a pond instead. The ink is a 0.25 mm pen at the swatch's scale, clamped to
+what reads on screen. Coordinates are written in sheet units with one decimal
+and points closer than half a unit to the last one dropped, so the README
+strips stay a few hundred KB (the busiest, vegetation and generators, about
+1 MB). Everything is drawn y-down (page coordinates), so upright symbols stand
+up and `light_angle` reads as on a page.
 
-### Clean test shapes (`gallery_shapes()`)
+### Outputs
 
-All gallery sheets and README strips use smooth, generous `52 × 52 mm` test
-geometries so patterns read clearly without spiky polygon artifacts:
-- `square` — `52 × 52 mm` square
-- `card` — `52 × 52 mm` rounded rectangle (`r = 5 mm`, 64 vertices)
-- `ring` — smooth 96-vertex circular ring (`R = 26 mm`) with a 64-vertex inner hole (`r = 9 mm`)
-- `island` — smooth 96-vertex harmonic island contour (`R ≈ 25 mm`)
-- `pond_island` — smooth organic island with an interior pond hole
-- `star` — clean 5-pointed star (`R = 27 mm`, `r = 13.5 mm`)
-- `archipelago` — two-island multi-polygon region with a hole
+- `docs/img/{water,vegetation,ground,rock,built,sky,plain}.svg`: every
+  material of each group (sky: `clouds` and three variations), rows of at
+  most six, balanced.
+- `docs/img/generators.svg` (every generator at its defaults),
+  `docs/img/options.svg` (a dozen option settings), `docs/img/symbols.svg`
+  (every mark in the symbol library).
+- `docs/img/{hero,tour,shapes,fray,edges-and-masks,cad,dither,placement,custom}.svg`:
+  the feature strips (`hero`: `serpentine` coloured per pen-down against the
+  stroke count of `lines`; `cad`: `tile` with `pat`; `custom`: isolines, a
+  profile, `scatter` and `tile` with your own `motif`, an SVG tile).
+- `examples/gallery/gallery.svg`: the whole catalogue, a section per group
+  with every material's description, then the generators, the options and
+  the symbols.
+- `examples/gallery/{fray,edges-and-masks,cad,custom,dither,placement}.svg`:
+  row-and-column sheets of variations across the 52 mm test shapes
+  (`square`, `card`, `ring`, `island`, `pond_island`, `star`, `archipelago`).
 
-### Generated sheets (`examples/gallery/`)
+Other demos write their own files into `examples/gallery/`:
+`hand_demo` (`hand-demo`, `doodle-trees`, `curl-waves`), `clouds_demo`
+(`clouds-variations`), `growth_demo` (`growth-*`), `isoline_blobs_demo`
+(`isoline-*`, `forest-*`). Delete a file there only if nothing writes it.
 
-1. **Per-pattern sheets (`examples/gallery/<slug>.svg`)**:
-   - 3 rows (`0.9 mm`, `1.6 mm`, `2.6 mm`, paired with `0° / +20° / +45°` for angled fills)
-   - 4 columns:
-     1. `square (unfrayed)` — solid wall border
-     2. `ring + hole (unfrayed)` — solid wall border around outer ring and hole
-     3. `frayed (with guide)` — organic island with `fray = 8.5 mm` and a dashed boundary guide
-     4. `frayed (ink only)` — the same frayed fill with no boundary line, floating on paper
-2. **Categorized visual reference (`examples/gallery/gallery.svg`)**:
-   - Vertical 7-column poster grouped by `Category`, showing each pattern side-by-side on a crisp square and on a frayed organic contour (`fray = 8.5 mm`) with its name and description underneath.
-3. **Alphabetical index (`examples/gallery/all-patterns.svg`)**:
-   - 10-column alphabetical grid of all 99 catalog patterns.
-4. **Universal edge fraying showcase (`examples/gallery/fray.svg`)**:
-   - Compares `fray = 0 mm`, `fray = 4.5 mm`, `fray = 9.0 mm (with guide)`, and `fray = 9.0 mm (ink only)` across 12 patterns spanning continuous lines, flow streamlines, discrete marks, botanicals, and closed Voronoi cells.
-5. **Boundary modes & polygon masks showcase (`examples/gallery/edges-and-masks.svg`)**:
-   - Compares `EdgeMode::Clip`, `EdgeMode::Inside`, `EdgeMode::Overflow(3.5)`, `FillOutput.mask` polygon silhouettes, and multi-layer background knockouts (`below.difference(&out.mask)`).
-6. **Specialized sheets (`cad.svg`, `custom.svg`, `dither.svg`, `placement.svg`)** and **README strips (`docs/img/*.svg`)**.
+Check the output by rasterizing it: `rsvg-convert -w 1600 -b white x.svg -o x.png`.
+
+## Catalogue review sheet — `examples/catalog_sheet.rs`
+
+A contact sheet for working on patterns. With no pattern arguments it draws
+every material and every generator at its defaults; otherwise a pattern name
+then `key=value` options per cell, `|` between cells (values parse as
+numbers, `a,b` lists, `true`/`false`, or words; `spacing`, `angle`, `seed`,
+`fray`, `inset`, `edge` set the standard fields). Each cell is labelled with
+its options, stroke count and time; an error is printed in the cell.
+
+```sh
+cargo run --release --example catalog_sheet -- out.svg
+cargo run --release --example catalog_sheet -- out.svg hatch cross=2 '|' hatch dash=0.8,0.4 dash_jitter=0.6
+cargo run --release --example catalog_sheet -- out.svg --shape=blob --global --cell=40 --cols=4 --pen=0.3
+cargo run --release --example catalog_sheet -- --json   # catalog::describe()
+```
 
 ## Plot-sheet tool — `tools/plot_sheet.py`
 
@@ -61,7 +83,7 @@ python tools/plot_sheet.py tools/plot_sheet.example.json -o sheet.svg
 
 - Config is JSON; only `patterns` is required. `tools/plot_sheet.example.json`
   is the 152.4 × 101.6 mm (6 × 4 in, A5 landscape) reference.
-- Each entry names a fill and passes the arguments it takes (`spacing`,
+- Each entry names a binding function (`getattr(penfill, name)`) and passes the arguments it takes (`spacing`,
   `angle`, `seed`, `mark`, `lattice`, `cell`, `pat`, `scale`, `line_width`,
   `size`, `hatch`, `centre`). **An unknown key is an error**, so a typo is
   caught instead of silently ignored.

@@ -4,6 +4,30 @@ The paths by which a caller supplies their own geometry instead of choosing a
 built-in fill. All share one contract: the engine clips to the region, the
 caller does not.
 
+## Through the catalogue — data, no code
+
+What a host that only sends data (draw.land profiles, JSON) can do, and the
+first thing to reach for from Rust:
+
+- **A new combination.** A material is only layers of generators with
+  settings (`catalog/materials.rs`); every generator option is open, so most
+  new looks are a `Spec`: `scatter` with `motif: "tuft"`, `density: "noise"`.
+- **Your own mark.** `scatter` takes `motif` as polylines (`Value::Lines`) in
+  mm around the origin, up is negative y, drawn at their own size, placed on
+  the anchored sites like any named symbol (`rotate`, `vary`, `jitter`,
+  tone, `edge: inside` all apply).
+- **Your own tile.** `tile` takes `motif` as polylines too and lays them
+  through `tile::fill_tile` on the anchored lattice: `size` `[w, h]` is the
+  tile box centred on the origin (unset: the lines' extent), `stagger` the
+  row offset as a share of the width.
+- **A CAD hatch.** `tile` with `pat`: a built-in name (`pat::BUILTIN`) or the
+  text of a `.pat` definition (first pattern with lines); one pattern unit is
+  `spacing` mm. `pat` wins over `motif`.
+
+The Python and Node `fill` functions reach the catalogue through
+`fill_by_name`, so only numeric options pass there; polylines and `.pat`
+text go through their own `tile`, `svg_tile` and `pat` functions instead.
+
 ## `pattern.rs` — your own function and the unified pattern contract
 
 `fill_pattern(region, seed, anchor, draw)`, `fill_pattern_with(region, params, draw)`,
@@ -43,10 +67,13 @@ The engine clips (and when `params.fray > 0` and `!tools.claim_fray()`, applies
 universal geometry-adaptive edge fraying across long lines, discrete marks/dots,
 and small closed rings) against `canvas.limit` at the end.
 
-The unified pattern registry (`FILL_NAMES`, `all_fill_names()`,
-`fill_by_name(name, region, params)`, `fill_output_by_name(name, region, params)`)
-dispatches all built-in geometric, lattice, scatter, nature, texture, isoline,
-`litho::BUILTIN`, and `pat:<NAME>` patterns through this contract.
+The catalogue's generators (`src/catalog/gen_*.rs`) are written against this
+same contract: each is a `draw(&Canvas, &Tools, &Args)` run through
+`fill_pattern_with` / `fill_pattern_output`, so everything above applies to
+them. `fill_by_name` / `fill_output_by_name` / `all_fill_names()` resolve
+names through the catalogue (`catalog::fill`), translating `FillParams` into
+a `catalog::Spec` (standard fields, and the numeric `custom` values the
+pattern's generators declare; others are dropped).
 
 **Invariant** (`built_in_fills_compose_whole_or_per_piece`): a built-in fill
 used through `fill_pattern` must equal the direct fill, whether drawn whole or
@@ -62,6 +89,9 @@ box are fine — they overlap the neighbour, as in a CAD hatch (the `spill`
 computation widens the sampling span to allow for it).
 
 ## `pat.rs` — CAD `.pat` hatch patterns
+
+Reached from the catalogue as `tile` with `pat` (see above); `fill_pat` is the
+direct function the bindings' `pat` calls.
 
 The AutoCAD/LibreCAD/QCAD `.pat` format: a list of line families, each
 `angle, x0, y0, dx, dy [, dash1, dash2, …]`. Dashes alternate pen down

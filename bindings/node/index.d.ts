@@ -149,10 +149,10 @@ export type SeedOptions = FillOptions
 export type ConcentricOptions = FillOptions
 export type CracksOptions = FillOptions
 
-/** Names of all built-in fills supported by `fill` and `fillOutput`. */
+/** Every name `fill` and `fillOutput` take: the catalogue's materials, then its generators. */
 export declare function fills(): Array<string>
 
-/** Run any built-in pattern by name with unified `FillOptions`. */
+/** Pattern `name` from the catalogue (a material or a generator; see `fills()`). `spacing` defaults to 2 mm; `custom` passes the generator's numeric options (`{ cross: 2 }`), keys it does not take are ignored. */
 export declare function fill(region: Region, name: string, spacing?: number | undefined | null, options?: FillOptions | undefined | null): Array<Array<[number, number]>>
 
 /** Run any built-in pattern by name and return `{ strokes, mask: Region }`. */

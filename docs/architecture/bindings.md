@@ -40,9 +40,13 @@ is unavailable there; the profile sets `opt-level = "s"` for size.
 
 ## Adding a fill to a binding
 
-Registering a new fill in `src/pattern.rs` (`FILL_NAMES` and `fill_named`)
-automatically makes it available in `fill` / `fill_output` (Python), `fill` /
-`fillOutput` / `fills()` (Node), and `render` / `fillNames()` (wasm). Dedicated
+Adding a generator or material to the catalogue (`src/catalog/`, see
+[catalog.md](catalog.md)) automatically makes it available in `fill` /
+`fill_output` / `FILLS` (Python), `fill` / `fillOutput` / `fills()` (Node), and
+`render` / `fillNames()` (wasm), all through `fill_by_name`. That path carries
+the standard parameters and numeric `custom` options only; word, list and
+polyline options (`motif`, `shape`, `dash`, `pat`) need a binding that passes
+`catalog::Spec` values. Dedicated
 top-level convenience wrappers can also be added to `bindings/python/src/lib.rs`
 (`penfill.pyi`) and `bindings/node/src/lib.rs` (`index.d.ts`).
 
